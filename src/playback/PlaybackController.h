@@ -159,6 +159,9 @@ public:
     /// their tags): the ones queued, playing or played take it on, each
     /// staying the occurrence it was
     void refreshSongDetails(const QList<Song> &fresh);
+    /// Spotify DJ speaks around its tracks, so crossfade must not overlap them;
+    /// LibraryStore turns this on while a DJ queue plays.
+    void setDjMode(bool on) { m_djMode = on; }
     Q_INVOKABLE void playFromQueue(const swiftify::Song &song);
     Q_INVOKABLE void togglePlayback();
     Q_INVOKABLE void pause();
@@ -261,6 +264,7 @@ private:
     QList<Song> m_queue;
     QList<Song> m_shuffledQueue;
     QList<Song> m_history;
+    bool m_djMode = false;
     std::optional<Song> m_currentSong;
     SongListModel *m_upNext;
     SongListModel *m_previouslyPlayed;

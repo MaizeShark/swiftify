@@ -199,8 +199,12 @@ pub extern "C" fn swiftify_core_new() -> *mut SwiftifyCore {
     let Ok(completions) = CompletionQueue::new() else {
         return ptr::null_mut();
     };
+    let core = Arc::new(SpotifyCore::new());
+    // so the core can spawn onto this runtime from a synchronous ffi call made
+    // on the caller's thread, which is not in the runtime's context.
+    core.set_runtime_handle(runtime().handle().clone());
     Box::into_raw(Box::new(SwiftifyCore {
-        core: Arc::new(SpotifyCore::new()),
+        core,
         completions: Arc::new(completions),
     }))
 }
@@ -455,6 +459,21 @@ async_call!(
         core.artist_top_tracks_json(artist_uri).await
     }
 );
+async_call!(
+    /// starts a fresh Spotify DJ set and completes with its tracks as json,
+    /// shaped like a playlist page. the core keeps the DJ's narration and the
+    /// url of the next set.
+    swiftify_core_dj_context_json() => |core| {
+        core.dj_context_json().await
+    }
+);
+async_call!(
+    /// completes with the next DJ set as json (empty items when the DJ offered
+    /// no continuation). call it as the DJ queue runs low.
+    swiftify_core_dj_more_json() => |core| {
+        core.dj_more_json().await
+    }
+);
 
 /// what a music file's tags say, as json (crate::local::LocalTags), or null
 /// with `*error` set. an embedded cover is written into `artwork_dir`. it
@@ -592,6 +611,29 @@ pub unsafe extern "C" fn swiftify_core_set_audio_cache(
 }
 fallible_call!(swiftify_core_set_playback_shaping(tempo: f32, pitch_semitones: f32, preserves_pitch: bool)
     => |core| core.set_playback_shaping(tempo, pitch_semitones, preserves_pitch));
+
+/// turns native spotify-connect presence on or off: when on, swiftify registers
+/// as a connect device under `device_name`, reports what it plays (so discord's
+/// "listening to spotify" reflects it), and advertises the capability DJ needs.
+/// takes effect at once when connected, otherwise at the next connection.
+///
+/// # Safety
+/// `core` is null or live; `device_name` is null or a nul-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn swiftify_core_set_connect_reporting(
+    core: *const SwiftifyCore,
+    enabled: c_int,
+    device_name: *const c_char,
+) {
+    // SAFETY: forwarded from the caller.
+    let Some(handle) = (unsafe { handle(core) }) else {
+        return;
+    };
+    // SAFETY: forwarded from the caller.
+    let device_name =
+        unsafe { read_str(device_name) }.unwrap_or_else(|_| "Swiftify".to_owned());
+    handle.core.set_connect_reporting(enabled != 0, device_name);
+}
 
 /// returns null on success, or an error message to free.
 ///

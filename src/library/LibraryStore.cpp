@@ -173,7 +173,12 @@ LibraryStore *LibraryStore::create(QQmlEngine *, QJSEngine *)
 
 void LibraryStore::attachPlayer(PlaybackController *player)
 {
+    m_player = player;
     connect(player, &PlaybackController::playedFromSearch, this, &LibraryStore::recordSearchPlayback);
+    // as the DJ queue advances, keep it fed with new sets; this also notices
+    // when the person has played something else and ends the DJ.
+    connect(player, &PlaybackController::currentSongChanged, this, &LibraryStore::maybeExtendDj);
+    connect(player, &PlaybackController::queueChanged, this, &LibraryStore::maybeExtendDj);
 }
 
 void LibraryStore::attachLocalFiles(LocalLibrary *localFiles)
@@ -675,6 +680,90 @@ QCoro::Task<> LibraryStore::runPlaylistLoad(Playlist playlist, CancelToken token
         }
     }
     m_songLoad.finish(token);
+}
+
+void LibraryStore::startDj()
+{
+    if (!m_player) {
+        return;
+    }
+    detach(runStartDj(m_djLoad.renew()));
+}
+
+QCoro::Task<> LibraryStore::runStartDj(CancelToken token)
+{
+    try {
+        co_await m_session->ensureFreshPlaybackConnection();
+        throwIfCancelled(token);
+        const QList<Song> songs = songsFromItems(co_await m_session->core()->djContextJson());
+        throwIfCancelled(token);
+        if (songs.isEmpty()) {
+            reportError(QStringLiteral("Spotify DJ"), QStringLiteral("The DJ did not return any tracks."));
+            co_return;
+        }
+        m_djUris.clear();
+        for (const Song &song : songs) {
+            m_djUris.insert(song.uri);
+        }
+        setDjActive(true);
+        m_player->play(songs.first(), songs);
+    } catch (const Cancelled &) {
+    } catch (const SpotifyError &error) {
+        reportError(QStringLiteral("Spotify DJ"), error.message());
+    }
+    m_djLoad.finish(token);
+}
+
+void LibraryStore::maybeExtendDj()
+{
+    if (!m_djActive || !m_player) {
+        return;
+    }
+    // the person played something that is not from the DJ: leave the DJ.
+    if (!m_djUris.contains(m_player->currentSong().uri)) {
+        m_djUris.clear();
+        setDjActive(false);
+        return;
+    }
+    if (m_djLoad.isRunning()) {
+        return;
+    }
+    // fetch the next set once only two tracks remain after the current one.
+    const int remaining = m_player->activeQueue().size() - m_player->currentQueueIndex() - 1;
+    if (remaining <= 2) {
+        detach(runDjMore(m_djLoad.renew()));
+    }
+}
+
+void LibraryStore::setDjActive(bool on)
+{
+    if (m_djActive == on) {
+        return;
+    }
+    m_djActive = on;
+    // keep crossfade from overlapping the DJ's spoken lines while it plays
+    if (m_player) {
+        m_player->setDjMode(on);
+    }
+    emit djActiveChanged();
+}
+
+QCoro::Task<> LibraryStore::runDjMore(CancelToken token)
+{
+    try {
+        const QList<Song> songs = songsFromItems(co_await m_session->core()->djMoreJson());
+        throwIfCancelled(token);
+        if (m_djActive) {
+            for (const Song &song : songs) {
+                m_djUris.insert(song.uri);
+                m_player->playLast(song);
+            }
+        }
+    } catch (const Cancelled &) {
+    } catch (const SpotifyError &error) {
+        reportError(QStringLiteral("Spotify DJ"), error.message());
+    }
+    m_djLoad.finish(token);
 }
 
 void LibraryStore::selectAlbum(const Album &album)

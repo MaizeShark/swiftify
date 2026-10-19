@@ -61,6 +61,8 @@ class Settings : public QObject {
     Q_PROPERTY(double zoom READ zoom WRITE setZoom NOTIFY zoomChanged FINAL)
     Q_PROPERTY(bool discordEnabled READ discordEnabled WRITE setDiscordEnabled NOTIFY discordEnabledChanged FINAL)
     Q_PROPERTY(QString discordApplicationId READ discordApplicationId WRITE setDiscordApplicationId NOTIFY discordApplicationIdChanged FINAL)
+    Q_PROPERTY(bool connectPresenceEnabled READ connectPresenceEnabled WRITE setConnectPresenceEnabled NOTIFY connectPresenceEnabledChanged FINAL)
+    Q_PROPERTY(QString connectDeviceName READ connectDeviceName WRITE setConnectDeviceName NOTIFY connectDeviceNameChanged FINAL)
     Q_PROPERTY(QString language READ language WRITE setLanguage NOTIFY languageChanged FINAL)
 
 public:
@@ -164,6 +166,10 @@ public:
     void setDiscordEnabled(bool value);
     QString discordApplicationId() const { return m_discordApplicationId; }
     void setDiscordApplicationId(const QString &value);
+    bool connectPresenceEnabled() const { return m_connectPresenceEnabled; }
+    void setConnectPresenceEnabled(bool value);
+    QString connectDeviceName() const { return m_connectDeviceName; }
+    void setConnectDeviceName(const QString &value);
     QString language() const { return m_language; }
     void setLanguage(const QString &value);
 
@@ -201,6 +207,8 @@ signals:
     void zoomChanged();
     void discordEnabledChanged();
     void discordApplicationIdChanged();
+    void connectPresenceEnabledChanged();
+    void connectDeviceNameChanged();
     void languageChanged();
 
 private:
@@ -245,6 +253,8 @@ private:
     double m_zoom = 1.0;
     bool m_discordEnabled = false;
     QString m_discordApplicationId;
+    bool m_connectPresenceEnabled = false;
+    QString m_connectDeviceName = QStringLiteral("Swiftify");
     QString m_language = QStringLiteral("system");
 };
 

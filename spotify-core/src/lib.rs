@@ -2,7 +2,7 @@ use std::{
     io,
     path::PathBuf,
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
@@ -25,6 +25,8 @@ use serde::Serialize;
 use tokio::{sync::watch, time::timeout};
 
 mod artist;
+mod connect_state;
+mod dj;
 mod dsp;
 mod file_playback;
 pub mod live_input;
@@ -33,6 +35,7 @@ mod output;
 mod playlist;
 mod spectrum;
 
+use connect_state::{ConnectPresence, NowPlaying};
 use dsp::{EQ_BAND_COUNT, SharedDsp};
 use rodio::Source;
 use spectrum::{OutputHealth, SharedSpectrum, SpectrumSink};
@@ -217,6 +220,28 @@ pub struct SpotifyCore {
     local_playback_active: Arc<AtomicBool>,
     /// shared with every sink this core builds, streaming and files alike.
     output_health: OutputHealth,
+    /// the spotify track currently loaded in the streaming player, if any.
+    /// `None` whenever a spotify track is not what plays (a local file, or
+    /// nothing). read by the connect reporter to say what the device plays.
+    current_uri: Arc<Mutex<Option<String>>>,
+    /// the current song, fed to the connect reporter. it always exists so
+    /// playback code can report whether or not a reporter is running.
+    connect_feed: watch::Sender<NowPlaying>,
+    /// the running connect reporter, when presence is on and a session is up.
+    connect_presence: Mutex<Option<ConnectPresence>>,
+    /// whether the user has turned connect presence on, and the device name to
+    /// register with. honored the next time a session connects.
+    connect_enabled: AtomicBool,
+    connect_device_name: Mutex<String>,
+    /// the runtime the connect reporter is spawned onto. set by the ffi layer so
+    /// a synchronous call made off the runtime can still spawn the reporter.
+    connect_runtime: OnceLock<tokio::runtime::Handle>,
+    /// the url of the next DJ set to fetch when the current one runs low, kept
+    /// between a `dj_context_json` and the `dj_more_json` calls that follow it.
+    dj_next_page: Mutex<Option<String>>,
+    /// each DJ track's narration, keyed by uri, so loading a track can hand its
+    /// lines to the player. accumulated as sets are resolved.
+    dj_narration: Mutex<std::collections::HashMap<String, dj::Narration>>,
 }
 
 impl Default for SpotifyCore {
@@ -238,7 +263,21 @@ impl SpotifyCore {
             timeline: Arc::new(Mutex::new(PlaybackTimeline::default())),
             local_playback_active: Arc::new(AtomicBool::new(false)),
             output_health: OutputHealth::new(),
+            current_uri: Arc::new(Mutex::new(None)),
+            connect_feed: watch::Sender::new(NowPlaying::default()),
+            connect_presence: Mutex::new(None),
+            connect_enabled: AtomicBool::new(false),
+            connect_device_name: Mutex::new("Swiftify".to_owned()),
+            connect_runtime: OnceLock::new(),
+            dj_next_page: Mutex::new(None),
+            dj_narration: Mutex::new(std::collections::HashMap::new()),
         }
+    }
+
+    /// records the runtime the core's async work runs on, so the connect reporter
+    /// can be spawned from a synchronous ffi call that is not in its context.
+    pub fn set_runtime_handle(&self, handle: tokio::runtime::Handle) {
+        let _ = self.connect_runtime.set(handle);
     }
 
     fn make_player_slot(
@@ -270,11 +309,99 @@ impl SpotifyCore {
             Arc::clone(&self.timeline),
             Arc::clone(&self.local_playback_active),
             Arc::clone(&active),
+            Arc::clone(&self.current_uri),
+            self.connect_feed.clone(),
         ));
         PlayerSlot {
             player,
             gain,
             active,
+        }
+    }
+
+    /// records which spotify track the streaming player now holds (or `None`
+    /// for a local file or nothing) and reports it to the connect device.
+    fn set_current_uri(&self, uri: Option<String>) {
+        if let Ok(mut current) = self.current_uri.lock() {
+            *current = uri;
+        }
+        self.report_now_playing();
+    }
+
+    /// hands the current song to the connect reporter. a no-op when presence is
+    /// off, so it is safe to call from any transport change.
+    fn report_now_playing(&self) {
+        push_now_playing(&self.connect_feed, &self.timeline, &self.current_uri);
+    }
+
+    /// gives `player` the DJ lines to speak around `uri`, if it is a DJ track,
+    /// or clears any it held. call it before loading or preloading the track.
+    fn apply_narration(&self, player: &Player, spotify_uri: &str, uri: &SpotifyUri) {
+        let narration = self
+            .dj_narration
+            .lock()
+            .ok()
+            .and_then(|map| map.get(spotify_uri).cloned());
+        player.set_narration(uri.clone(), narration);
+    }
+
+    /// starts (or restarts) the connect presence reporter for `session` if the
+    /// user has it enabled. replaces any reporter already running.
+    fn start_connect_presence(&self, session: &Session) {
+        if !self.connect_enabled.load(Ordering::Acquire) {
+            return;
+        }
+        let device_name = self
+            .connect_device_name
+            .lock()
+            .ok()
+            .map(|name| name.clone())
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| "Swiftify".to_owned());
+        // the stored runtime handle lets this run from an off-runtime ffi call;
+        // inside `connect_with` the current handle serves just as well.
+        let Some(runtime) = self
+            .connect_runtime
+            .get()
+            .cloned()
+            .or_else(|| tokio::runtime::Handle::try_current().ok())
+        else {
+            eprintln!("spotify-core: connect presence off, no runtime to spawn on");
+            return;
+        };
+        let presence = ConnectPresence::start(
+            runtime,
+            session.clone(),
+            device_name,
+            self.connect_feed.subscribe(),
+        );
+        if let Ok(mut slot) = self.connect_presence.lock() {
+            *slot = Some(presence);
+        }
+    }
+
+    /// stops the connect reporter, which puts the device inactive before it
+    /// goes.
+    fn stop_connect_presence(&self) {
+        if let Ok(mut slot) = self.connect_presence.lock() {
+            *slot = None;
+        }
+    }
+
+    /// turns native spotify-connect presence (and so discord's "listening to
+    /// spotify", and the `supports_dj` capability DJ needs) on or off, with the
+    /// device name to register. takes effect at once when a session is up, and
+    /// otherwise the next time one connects.
+    pub fn set_connect_reporting(&self, enabled: bool, device_name: String) {
+        self.connect_enabled.store(enabled, Ordering::Release);
+        if let Ok(mut name) = self.connect_device_name.lock() {
+            *name = device_name;
+        }
+        let session = self.lock_state().ok().and_then(|state| state.session.clone());
+        match (enabled, session) {
+            (true, Some(session)) => self.start_connect_presence(&session),
+            (false, _) => self.stop_connect_presence(),
+            (true, None) => {}
         }
     }
 
@@ -371,10 +498,14 @@ impl SpotifyCore {
             let _switching = self.lock_switching();
             let mut state = self.lock_state()?;
             mixer.set_volume((state.volume * VolumeCtrl::MAX_VOLUME as f32).round() as u16);
-            state.session = Some(session);
+            state.session = Some(session.clone());
             state.mixer = Some(mixer);
             (state.player.replace(player), state.standby_player.replace(standby))
         };
+        // a new session means a new connect device; drop any stale now-playing
+        // and register presence afresh if the user has it on.
+        self.set_current_uri(None);
+        self.start_connect_presence(&session);
         // drop outside the state lock because this may wait on the player thread
         if let Some(previous) = previous {
             previous.player.stop();
@@ -389,6 +520,8 @@ impl SpotifyCore {
 
     pub fn disconnect(&self) {
         self.begin_playback_request();
+        self.stop_connect_presence();
+        self.set_current_uri(None);
         self.clear_local_playback();
         let players = self.lock_state().ok().map(|mut state| {
             let players = (state.player.take(), state.standby_player.take());
@@ -575,6 +708,11 @@ impl SpotifyCore {
                 standby.player.stop();
             }
             self.reset_timeline();
+            // set before the load so the player-event monitor reports this uri
+            // when its Playing event arrives, not whatever played before.
+            self.set_current_uri(Some(spotify_uri.clone()));
+            // give the player this track's DJ lines (if any) before it loads.
+            self.apply_narration(&player, &spotify_uri, &uri);
             player.load(uri.clone(), true, 0);
         }
 
@@ -612,8 +750,12 @@ impl SpotifyCore {
     pub fn preload_track(&self, spotify_uri: String, preload_standby: bool) -> Result<(), String> {
         let uri = Self::parse_playable_uri(&spotify_uri)?;
         let (active, standby) = self.player_slots()?;
+        // the preloaded decoder is built with the track's DJ lines, so set them
+        // first, as librespot's spirc does before a preload.
+        self.apply_narration(&active.player, &spotify_uri, &uri);
         active.player.preload(uri.clone());
         if preload_standby && let Some(standby) = standby {
+            self.apply_narration(&standby.player, &spotify_uri, &uri);
             standby.player.preload(uri);
         }
         Ok(())
@@ -651,6 +793,7 @@ impl SpotifyCore {
             }
             self.clear_local_playback();
             incoming.set_gain(0.0);
+            self.apply_narration(&incoming.player, &spotify_uri, &uri);
             incoming.player.load(uri.clone(), true, 0);
         }
 
@@ -692,6 +835,10 @@ impl SpotifyCore {
                         timeline.duration_ms = duration;
                         timeline.observe_position(position_ms, Some(true));
                     }
+                    // the incoming slot's monitor skipped this track's Playing
+                    // event while it was still the standby, so report the change
+                    // here now that it is the active track.
+                    self.set_current_uri(Some(spotify_uri.clone()));
                     break;
                 }
                 PlayerEvent::Unavailable { track_id, .. } if track_id == uri => {
@@ -873,6 +1020,8 @@ impl SpotifyCore {
         rate: u32,
         channels: u32,
     ) -> Result<(), String> {
+        // live input is not a spotify track: the connect device reports idle.
+        self.set_current_uri(None);
         let sink = self.resolve_live_sink()?;
         {
             let state = self.lock_state()?;
@@ -951,6 +1100,8 @@ impl SpotifyCore {
         if !self.is_latest_request(ticket) {
             return Err(SUPERSEDED.to_owned());
         }
+        // a local file is not a spotify track: the connect device reports idle.
+        self.set_current_uri(None);
         let path = PathBuf::from(path);
         if !path.is_file() {
             return Err(format!("{} is no longer there", path.display()));
@@ -1098,6 +1249,38 @@ impl SpotifyCore {
     /// the web api's top tracks response, which spotify took away
     pub async fn artist_top_tracks_json(&self, artist_uri: String) -> Result<String, String> {
         artist::artist_top_tracks_json(&self.session()?, &artist_uri).await
+    }
+
+    /// starts a fresh Spotify DJ set ("Let DJ pick"): resolves the DJ context
+    /// through its lexicon session and returns the set's tracks as json shaped
+    /// like a playlist page. caches the next set's url and the tracks'
+    /// narration for the follow-up `dj_more_json` and for playback.
+    pub async fn dj_context_json(&self) -> Result<String, String> {
+        let set = dj::fresh_set(&self.session()?).await?;
+        if let Ok(mut next) = self.dj_next_page.lock() {
+            *next = set.next_page_url;
+        }
+        if let Ok(mut narration) = self.dj_narration.lock() {
+            *narration = set.narration;
+        }
+        Ok(set.json)
+    }
+
+    /// the next DJ set, from the url the last one carried. returns an empty
+    /// page when the DJ offered no continuation. accumulates narration.
+    pub async fn dj_more_json(&self) -> Result<String, String> {
+        let next = self.dj_next_page.lock().ok().and_then(|next| next.clone());
+        let Some(next) = next else {
+            return Ok(r#"{"items":[]}"#.to_owned());
+        };
+        let set = dj::more(&self.session()?, &next).await?;
+        if let Ok(mut cached) = self.dj_next_page.lock() {
+            *cached = set.next_page_url;
+        }
+        if let Ok(mut narration) = self.dj_narration.lock() {
+            narration.extend(set.narration);
+        }
+        Ok(set.json)
     }
 
     pub fn spectrum_levels(&self) -> Vec<f32> {
@@ -1340,6 +1523,8 @@ async fn monitor_player_events(
     timeline: Arc<Mutex<PlaybackTimeline>>,
     local_playback_active: Arc<AtomicBool>,
     slot_active: Arc<AtomicBool>,
+    current_uri: Arc<Mutex<Option<String>>>,
+    connect_feed: watch::Sender<NowPlaying>,
 ) {
     while let Some(event) = events.recv().await {
         // the connected librespot player remains alive while a file of the
@@ -1348,44 +1533,87 @@ async fn monitor_player_events(
         if local_playback_active.load(Ordering::Acquire) || !slot_active.load(Ordering::Acquire) {
             continue;
         }
-        let Ok(mut timeline) = timeline.lock() else {
-            continue;
-        };
-        if local_playback_active.load(Ordering::Acquire) || !slot_active.load(Ordering::Acquire) {
-            continue;
-        }
+        // a transition the connect reporter (and so discord) should hear about,
+        // as opposed to the once-a-second position tick it extrapolates past.
+        let mut report = false;
+        {
+            let Ok(mut timeline) = timeline.lock() else {
+                continue;
+            };
+            if local_playback_active.load(Ordering::Acquire) || !slot_active.load(Ordering::Acquire)
+            {
+                continue;
+            }
 
-        match event {
-            PlayerEvent::Loading { position_ms, .. } => {
-                timeline.observe_position(position_ms, Some(false));
+            match event {
+                PlayerEvent::Loading { position_ms, .. } => {
+                    timeline.observe_position(position_ms, Some(false));
+                }
+                PlayerEvent::Playing { position_ms, .. } => {
+                    timeline.observe_position(position_ms, Some(true));
+                    report = true;
+                }
+                PlayerEvent::PositionChanged { position_ms, .. }
+                | PlayerEvent::PositionCorrection { position_ms, .. } => {
+                    timeline.observe_position(position_ms, Some(true));
+                }
+                PlayerEvent::Paused { position_ms, .. } => {
+                    timeline.observe_position(position_ms, Some(false));
+                    report = true;
+                }
+                PlayerEvent::Seeked { position_ms, .. } => {
+                    timeline.observe_position(position_ms, None);
+                    report = true;
+                }
+                PlayerEvent::TrackChanged { audio_item } => {
+                    timeline.duration_ms = audio_item.duration_ms;
+                    report = true;
+                }
+                PlayerEvent::EndOfTrack { .. } => {
+                    timeline.position_ms = timeline.duration_ms;
+                    timeline.is_playing = false;
+                    timeline.end_of_track = true;
+                    timeline.observed_at = Some(Instant::now());
+                    report = true;
+                }
+                PlayerEvent::Stopped { .. } => {
+                    timeline.is_playing = false;
+                    timeline.observed_at = Some(Instant::now());
+                    report = true;
+                }
+                _ => {}
             }
-            PlayerEvent::Playing { position_ms, .. }
-            | PlayerEvent::PositionChanged { position_ms, .. }
-            | PlayerEvent::PositionCorrection { position_ms, .. } => {
-                timeline.observe_position(position_ms, Some(true));
-            }
-            PlayerEvent::Paused { position_ms, .. } => {
-                timeline.observe_position(position_ms, Some(false));
-            }
-            PlayerEvent::Seeked { position_ms, .. } => {
-                timeline.observe_position(position_ms, None);
-            }
-            PlayerEvent::TrackChanged { audio_item } => {
-                timeline.duration_ms = audio_item.duration_ms;
-            }
-            PlayerEvent::EndOfTrack { .. } => {
-                timeline.position_ms = timeline.duration_ms;
-                timeline.is_playing = false;
-                timeline.end_of_track = true;
-                timeline.observed_at = Some(Instant::now());
-            }
-            PlayerEvent::Stopped { .. } => {
-                timeline.is_playing = false;
-                timeline.observed_at = Some(Instant::now());
-            }
-            _ => {}
+        }
+        if report {
+            push_now_playing(&connect_feed, &timeline, &current_uri);
         }
     }
+}
+
+/// reads the current song from the timeline and the loaded uri and hands it to
+/// the connect reporter. a no-op when presence is off (nothing reads the feed).
+fn push_now_playing(
+    connect_feed: &watch::Sender<NowPlaying>,
+    timeline: &Arc<Mutex<PlaybackTimeline>>,
+    current_uri: &Arc<Mutex<Option<String>>>,
+) {
+    let uri = current_uri.lock().ok().and_then(|uri| uri.clone());
+    let (position_ms, duration_ms, is_playing) = timeline
+        .lock()
+        .map(|timeline| {
+            (
+                timeline.current_position_ms(),
+                timeline.duration_ms,
+                timeline.is_playing,
+            )
+        })
+        .unwrap_or((0, 0, false));
+    let _ = connect_feed.send(NowPlaying {
+        uri,
+        position_ms,
+        duration_ms,
+        is_playing,
+    });
 }
 
 #[derive(Serialize)]

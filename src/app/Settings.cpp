@@ -170,6 +170,11 @@ void Settings::load()
     if (QRegularExpression(QStringLiteral("^[0-9]{17,20}$")).match(id).hasMatch()) {
         m_discordApplicationId = id;
     }
+    m_connectPresenceEnabled = stored<bool>(m_store, "connectPresenceEnabled", false);
+    const QString deviceName = stored<QString>(m_store, "connectDeviceName", m_connectDeviceName).trimmed();
+    if (!deviceName.isEmpty()) {
+        m_connectDeviceName = deviceName;
+    }
     m_language = oneOf(stored<QString>(m_store, "language", m_language),
                       {QStringLiteral("system"), QStringLiteral("en"), QStringLiteral("ru")}, QStringLiteral("system"));
 
@@ -516,6 +521,23 @@ void Settings::setDiscordApplicationId(const QString &raw)
     m_store.setValue(QStringLiteral("discordApplicationId"), value);
     emit discordApplicationIdChanged();
 }
+void Settings::setConnectPresenceEnabled(bool value)
+{
+    if (m_connectPresenceEnabled == value) return;
+    m_connectPresenceEnabled = value;
+    m_store.setValue(QStringLiteral("connectPresenceEnabled"), value);
+    emit connectPresenceEnabledChanged();
+}
+
+void Settings::setConnectDeviceName(const QString &raw)
+{
+    const QString value = raw.trimmed();
+    if (value.isEmpty() || m_connectDeviceName == value) return;
+    m_connectDeviceName = value;
+    m_store.setValue(QStringLiteral("connectDeviceName"), value);
+    emit connectDeviceNameChanged();
+}
+
 void Settings::setLanguage(const QString &raw)
 {
     const QString value = oneOf(raw, {QStringLiteral("system"), QStringLiteral("en"), QStringLiteral("ru")}, QStringLiteral("system"));

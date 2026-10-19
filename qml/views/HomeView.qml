@@ -323,6 +323,15 @@ Flickable {
             readonly property bool sideBySide: width >= 520
 
             HomeShortcut {
+                width: parent.width
+                title: qsTr("Spotify DJ")
+                subtitle: qsTr("Let the DJ pick a mix for you")
+                symbol: "radio"
+                iconShape: "flower"
+                keepsShape: true
+                onClicked: Library.startDj()
+            }
+            HomeShortcut {
                 width: parent.sideBySide ? (parent.width - 12) / 2 : parent.width
                 title: qsTr("Favourite Songs")
                 // spotify's count, until the list itself has loaded

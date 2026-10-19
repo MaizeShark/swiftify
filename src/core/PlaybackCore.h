@@ -48,6 +48,11 @@ public:
     /// an artist's top songs read through the session, shaped like the web
     /// api's top tracks response, which spotify took away
     virtual QCoro::Task<QString> artistTopTracksJson(QString artistUri) = 0;
+    /// Spotify DJ ("X"): a fresh set, and the next set as the queue runs low.
+    /// both return json shaped like a playlist items page. default to empty for
+    /// cores that do not support it.
+    virtual QCoro::Task<QString> djContextJson() { co_return QString(); }
+    virtual QCoro::Task<QString> djMoreJson() { co_return QString(); }
 
     virtual void play() = 0;
     virtual void pause() = 0;
@@ -58,6 +63,10 @@ public:
     /// keeps streamed songs in `path`, up to `limitBytes`; both apply the
     /// next time playback connects
     virtual void setAudioCache(const QString &path, qint64 limitBytes) = 0;
+    /// native spotify-connect presence: registers a connect device and reports
+    /// what plays, so discord's "listening to spotify" reflects it. a no-op by
+    /// default for cores that do not support it.
+    virtual void setConnectReporting(bool /*enabled*/, const QString & /*deviceName*/) {}
     virtual void setPlaybackShaping(float tempo, float pitchSemitones, bool preservesPitch) = 0;
     virtual void setEqualizer(const QList<float> &gainsDb) = 0;
 

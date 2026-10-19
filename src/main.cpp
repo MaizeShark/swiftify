@@ -295,6 +295,14 @@ int main(int argc, char *argv[])
     applyStreaming();
     QObject::connect(&settings, &Settings::streamingQualityChanged, &core, applyStreaming);
     QObject::connect(&settings, &Settings::songCacheMegabytesChanged, &core, applyStreaming);
+    // native spotify-connect presence: registers a connect device so discord's
+    // "listening to spotify" reflects playback (and advertises the DJ capability)
+    const auto applyConnectReporting = [&] {
+        core.setConnectReporting(settings.connectPresenceEnabled(), settings.connectDeviceName());
+    };
+    applyConnectReporting();
+    QObject::connect(&settings, &Settings::connectPresenceEnabledChanged, &core, applyConnectReporting);
+    QObject::connect(&settings, &Settings::connectDeviceNameChanged, &core, applyConnectReporting);
     KeychainCredentialStore credentials;
     SpotifySession session(&core, &credentials, &network, &errors);
     PlaybackController player(&core, &session, &settings, &errors);

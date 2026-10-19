@@ -72,6 +72,11 @@ void swiftify_core_playlist_json(const SwiftifyCore *core, uint64_t request_id,
  * /v1/artists/{id}/top-tracks response. */
 void swiftify_core_artist_top_tracks_json(const SwiftifyCore *core, uint64_t request_id,
                                           const char *artist_uri);
+/* Spotify DJ ("X"). dj_context starts a fresh set ("Let DJ pick"); dj_more
+ * fetches the next set as the queue runs low. both complete with json shaped
+ * like the web api's items page (dj_more has empty items when the DJ ends). */
+void swiftify_core_dj_context_json(const SwiftifyCore *core, uint64_t request_id);
+void swiftify_core_dj_more_json(const SwiftifyCore *core, uint64_t request_id);
 /* plays a music file of the person's own from anywhere on disk: mp3, flac,
  * ogg vorbis, wav, aiff, or aac or apple lossless in an m4a. */
 void swiftify_core_play_file(const SwiftifyCore *core, uint64_t request_id, const char *path);
@@ -106,6 +111,13 @@ char *swiftify_core_set_audio_cache(const SwiftifyCore *core, const char *path,
 char *swiftify_core_set_playback_shaping(const SwiftifyCore *core, float tempo,
                                          float pitch_semitones, bool preserves_pitch);
 char *swiftify_core_set_equalizer(const SwiftifyCore *core, const float *gains_db, size_t count);
+
+/* native spotify-connect presence: when enabled, swiftify registers as a connect
+ * device named device_name and reports what it plays, so discord's "listening to
+ * spotify" reflects it. applies at once when connected, else at next connection.
+ * device_name may be NULL to use the default. */
+void swiftify_core_set_connect_reporting(const SwiftifyCore *core, int enabled,
+                                         const char *device_name);
 
 bool swiftify_core_session_is_valid(const SwiftifyCore *core);
 bool swiftify_core_audio_output_stalled(const SwiftifyCore *core);

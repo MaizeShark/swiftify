@@ -33,13 +33,22 @@ pub async fn playlist_json(session: &Session, playlist_uri: &str) -> Result<Stri
     };
     let uris = item_uris(session, &id).await?;
     let tracks = track_metadata(session, &uris).await?;
+    items_json(&uris, &tracks)
+}
+
+/// encodes tracks, in `uris` order, as the web api's items page. shared by the
+/// playlist and DJ paths, which both feed the front end the same shape.
+pub(crate) fn items_json(
+    uris: &[String],
+    tracks: &HashMap<String, TrackPayload>,
+) -> Result<String, String> {
     let items = uris
         .iter()
         .filter_map(|uri| tracks.get(uri))
         .map(|track| ItemPayload { item: track.clone() })
         .collect();
     serde_json::to_string(&PagePayload { items })
-        .map_err(|error| format!("failed to encode the playlist: {error}"))
+        .map_err(|error| format!("failed to encode the track list: {error}"))
 }
 
 /// every item's uri, in the playlist's order

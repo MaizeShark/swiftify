@@ -461,7 +461,7 @@ void PlaybackController::preloadNextTrack()
         return;
     }
     try {
-        m_core->preloadTrack(next->uri, m_settings->crossfadeEnabled());
+        m_core->preloadTrack(next->uri, m_settings->crossfadeEnabled() && !m_djMode);
     } catch (const SpotifyError &error) {
         qCDebug(lcPlayer) << "Could not preload the next track:" << error.message();
     }
@@ -1135,7 +1135,7 @@ void PlaybackController::pollPlayback()
         return;
     }
     syncPositionAndDuration();
-    if (m_playing && !m_crossfadeStarted && m_settings->crossfadeEnabled() && m_currentSong
+    if (m_playing && !m_crossfadeStarted && m_settings->crossfadeEnabled() && !m_djMode && m_currentSong
         && !m_currentSong->isLocalFile() && m_durationMs > 0) {
         std::optional<Song> next;
         bool recordHistory = true;

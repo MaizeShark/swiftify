@@ -565,6 +565,36 @@ Item {
             }
 
             ContentSection {
+                title: qsTr("Spotify Connect")
+                symbol: "cast"
+
+                ConfigSwitch {
+                    text: qsTr("Show as a Spotify Connect device")
+                    checked: Settings.connectPresenceEnabled
+                    onToggledTo: (checked) => Settings.connectPresenceEnabled = checked
+                }
+                OutlinedTextField {
+                    id: connectName
+                    x: 8
+                    width: Math.min(460, parent.width - 16)
+                    placeholder: qsTr("Device name")
+                    text: Settings.connectDeviceName
+                    onAccepted: Settings.connectDeviceName = text
+                    Connections {
+                        target: connectName.inputItem
+                        function onActiveFocusChanged() {
+                            if (!connectName.inputItem.activeFocus) Settings.connectDeviceName = connectName.text
+                        }
+                    }
+                }
+                NoteText {
+                    text: !Settings.connectPresenceEnabled
+                        ? qsTr("Off. Enable to report playback to Spotify so this shows as an active device — needed for Discord's native “Listening to Spotify” and for the DJ.")
+                        : qsTr("On. Link your Spotify account to Discord for the native “Listening to Spotify” status. Requires Premium.")
+                }
+            }
+
+            ContentSection {
                 title: qsTr("Account")
                 symbol: "account_circle"
 

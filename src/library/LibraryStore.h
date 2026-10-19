@@ -80,6 +80,8 @@ class LibraryStore : public QObject {
     QML_SINGLETON
 
     Q_PROPERTY(Page page READ page NOTIFY destinationChanged FINAL)
+    /// whether a Spotify DJ queue is currently playing (for a "change it up" affordance)
+    Q_PROPERTY(bool djActive READ djActive NOTIFY djActiveChanged FINAL)
     Q_PROPERTY(QString selectedPlaylistId READ selectedPlaylistId NOTIFY destinationChanged FINAL)
     Q_PROPERTY(swiftify::Playlist selectedPlaylist READ selectedPlaylist NOTIFY selectedPlaylistChanged FINAL)
     Q_PROPERTY(bool selectedPlaylistEditable READ isSelectedPlaylistEditable NOTIFY selectedPlaylistChanged FINAL)
@@ -221,6 +223,11 @@ public:
     // --- navigation ---------------------------------------------------------------
 
     Q_INVOKABLE void showHome();
+    /// starts Spotify DJ ("X"): resolves a fresh set and plays it, then keeps
+    /// the queue fed with new sets as it runs low. called again while the DJ is
+    /// playing, it fetches a fresh segment ("change it up").
+    Q_INVOKABLE void startDj();
+    bool djActive() const { return m_djActive; }
     Q_INVOKABLE void showSearch();
     Q_INVOKABLE void showSavedSongs();
     Q_INVOKABLE void showPlaylists();
@@ -270,6 +277,7 @@ public:
 
 signals:
     void destinationChanged();
+    void djActiveChanged();
     void selectedPlaylistChanged();
     void profileChanged();
     void pinsChanged();
@@ -330,6 +338,11 @@ private:
     QCoro::Task<> runAlbumLoad(Album album, CancelToken token);
     QCoro::Task<> runArtistLoad(Artist artist, CancelToken token);
     QCoro::Task<> runSearch(QString query, CancelToken token);
+    QCoro::Task<> runStartDj(CancelToken token);
+    QCoro::Task<> runDjMore(CancelToken token);
+    /// when DJ is playing and its queue runs low, fetch and append the next set.
+    void maybeExtendDj();
+    void setDjActive(bool on);
     QCoro::Task<> runToggleSaved(Song song, bool shouldSave, quint64 generation);
     QCoro::Task<> runSongNavigation(Song song, bool toAlbum);
     QCoro::Task<> runAdd(Song song, Playlist playlist);
@@ -344,6 +357,12 @@ private:
     Settings *m_settings;
     ErrorCenter *m_errors;
     LocalLibrary *m_localFiles = nullptr;
+    PlaybackController *m_player = nullptr;
+    /// Spotify DJ state: on while a DJ queue is playing, with the uris it has
+    /// queued so leaving the DJ (playing something else) ends it.
+    bool m_djActive = false;
+    QSet<QString> m_djUris;
+    TaskSlot m_djLoad;
 
     Destination m_destination;
     QList<Destination> m_history;

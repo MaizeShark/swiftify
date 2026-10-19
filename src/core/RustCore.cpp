@@ -94,6 +94,10 @@ void RustCore::open()
         swiftify_string_free(swiftify_core_set_audio_cache(m_core, m_cachePath.toUtf8().constData(),
                                                            quint64(std::max<qint64>(0, m_cacheBytes))));
     }
+    if (m_connectReporting) {
+        const QByteArray name = m_connectDeviceName.toUtf8();
+        swiftify_core_set_connect_reporting(m_core, 1, name.isEmpty() ? nullptr : name.constData());
+    }
 }
 
 void RustCore::close()
@@ -228,6 +232,16 @@ QCoro::Task<QString> RustCore::artistTopTracksJson(QString artistUri)
     co_return co_await request([&](quint64 id) { swiftify_core_artist_top_tracks_json(m_core, id, uri.constData()); });
 }
 
+QCoro::Task<QString> RustCore::djContextJson()
+{
+    co_return co_await request([&](quint64 id) { swiftify_core_dj_context_json(m_core, id); });
+}
+
+QCoro::Task<QString> RustCore::djMoreJson()
+{
+    co_return co_await request([&](quint64 id) { swiftify_core_dj_more_json(m_core, id); });
+}
+
 void RustCore::play() { throwIfError(swiftify_core_play(m_core)); }
 void RustCore::pause() { throwIfError(swiftify_core_pause(m_core)); }
 void RustCore::seek(quint32 positionMs) { throwIfError(swiftify_core_seek(m_core, positionMs)); }
@@ -244,6 +258,15 @@ void RustCore::setAudioCache(const QString &path, qint64 limitBytes)
     m_cachePath = path;
     m_cacheBytes = limitBytes;
     throwIfError(swiftify_core_set_audio_cache(m_core, path.toUtf8().constData(), quint64(std::max<qint64>(0, limitBytes))));
+}
+
+void RustCore::setConnectReporting(bool enabled, const QString &deviceName)
+{
+    m_connectReporting = enabled;
+    m_connectDeviceName = deviceName;
+    const QByteArray name = deviceName.toUtf8();
+    swiftify_core_set_connect_reporting(m_core, enabled ? 1 : 0,
+                                        name.isEmpty() ? nullptr : name.constData());
 }
 
 void RustCore::setPlaybackShaping(float tempo, float pitchSemitones, bool preservesPitch)

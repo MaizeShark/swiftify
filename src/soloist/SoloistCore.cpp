@@ -850,6 +850,16 @@ QCoro::Task<QString> SoloistCore::artistTopTracksJson(QString artistUri)
     co_return co_await m_fallback->artistTopTracksJson(artistUri);
 }
 
+QCoro::Task<QString> SoloistCore::djContextJson()
+{
+    co_return co_await m_fallback->djContextJson();
+}
+
+QCoro::Task<QString> SoloistCore::djMoreJson()
+{
+    co_return co_await m_fallback->djMoreJson();
+}
+
 void SoloistCore::setStreamQuality(int kbps)
 {
     m_fallback->setStreamQuality(kbps);
@@ -858,6 +868,11 @@ void SoloistCore::setStreamQuality(int kbps)
 void SoloistCore::setAudioCache(const QString &path, qint64 limitBytes)
 {
     m_fallback->setAudioCache(path, limitBytes);
+}
+
+void SoloistCore::setConnectReporting(bool enabled, const QString &deviceName)
+{
+    m_fallback->setConnectReporting(enabled, deviceName);
 }
 
 void SoloistCore::setPlaybackShaping(float tempo, float pitchSemitones, bool preservesPitch)

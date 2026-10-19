@@ -132,6 +132,19 @@ Item {
             tooltip: Player.repeatMode === Player.RepeatMode.One ? qsTr("Repeat song") : (Player.repeatMode === Player.RepeatMode.All ? qsTr("Repeat queue") : qsTr("Repeat off"))
             onClicked: Player.cycleRepeatMode()
         }
+        // while the DJ is playing, ask it for a fresh segment ("change it up")
+        TransportButton {
+            visible: !root.tiny && Library.djActive
+            anchors.verticalCenter: parent.verticalCenter
+            scheme: root.scheme
+            effect: TransportButton.Bounce
+            symbol: "refresh"
+            size: root.buttonSize
+            iconSize: root.tiny ? 18 : 20
+            fillWhenToggled: false
+            tooltip: qsTr("Change it up (new DJ segment)")
+            onClicked: Library.startDj()
+        }
     }
 
     Item {

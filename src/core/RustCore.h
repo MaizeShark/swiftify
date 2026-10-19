@@ -37,6 +37,8 @@ public:
     QCoro::Task<QString> lyricsJson(QString spotifyUri) override;
     QCoro::Task<QString> playlistJson(QString playlistUri) override;
     QCoro::Task<QString> artistTopTracksJson(QString artistUri) override;
+    QCoro::Task<QString> djContextJson() override;
+    QCoro::Task<QString> djMoreJson() override;
 
     void play() override;
     void pause() override;
@@ -45,6 +47,7 @@ public:
     float volume() const override;
     void setStreamQuality(int kbps) override;
     void setAudioCache(const QString &path, qint64 limitBytes) override;
+    void setConnectReporting(bool enabled, const QString &deviceName) override;
     void setPlaybackShaping(float tempo, float pitchSemitones, bool preservesPitch) override;
     void setEqualizer(const QList<float> &gainsDb) override;
 
@@ -78,6 +81,8 @@ private:
     int m_streamKbps = 0;
     QString m_cachePath;
     qint64 m_cacheBytes = 0;
+    bool m_connectReporting = false;
+    QString m_connectDeviceName;
 };
 
 } // namespace swiftify

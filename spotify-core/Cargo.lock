@@ -1534,8 +1534,6 @@ dependencies = [
 [[package]]
 name = "librespot-playback"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88258620bf3e6808ea1fadd11639648d77c06280b9f5a4c9d14ea79f6f998af6"
 dependencies = [
  "cpal",
  "form_urlencoded",
@@ -1558,8 +1556,6 @@ dependencies = [
 [[package]]
 name = "librespot-protocol"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e01f0b2d39f83fa162eb91d4a16313bcf99e77daf258abe8f7b7bcb1160b084"
 dependencies = [
  "protobuf",
  "protobuf-codegen",
@@ -2772,6 +2768,7 @@ name = "spotify-core"
 version = "0.1.8"
 dependencies = [
  "env_logger",
+ "futures-util",
  "hound",
  "http",
  "librespot",
