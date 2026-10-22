@@ -987,7 +987,7 @@ void LocalLibrary::keepNext()
     // copied before this began is known to it, so nothing is copied twice
     QtConcurrent::run(QThreadPool::globalInstance(), &LocalLibrary::keep, paths, m_trackStore, m_artworkDirectory,
                       m_copies)
-        .then(this, [this, id](const KeepResult &result) {
+        .then(this, [this, id = id](const KeepResult &result) {
             m_keeping = false;
             finishKeeping(id, result);
             setCopying(-1);

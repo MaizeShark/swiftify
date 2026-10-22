@@ -16,7 +16,7 @@ def unique_object(pairs):
     return result
 
 
-catalog = json.loads((root / "translations/ru.json").read_text(), object_pairs_hook=unique_object)
+catalog = json.loads((root / "translations/ru.json").read_text(encoding="utf-8"), object_pairs_hook=unique_object)
 for source, translated in catalog.items():
     forms = translated if isinstance(translated, list) else [translated]
     if isinstance(translated, list):
@@ -29,7 +29,7 @@ for source, translated in catalog.items():
 
 missing = []
 for path in (root / "qml").rglob("*.qml"):
-    for match in re.finditer(r'qsTr\(("(?:[^"\\]|\\.)*")', path.read_text()):
+    for match in re.finditer(r'qsTr\(("(?:[^"\\]|\\.)*")', path.read_text(encoding="utf-8")):
         source = json.loads(match.group(1))
         if source not in catalog:
             missing.append(f"{path.relative_to(root)}: {source}")

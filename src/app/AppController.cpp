@@ -225,6 +225,8 @@ void AppController::handleCommand(const QString &command)
         library->showPlaylists();
     } else if (command == QLatin1StringView("songs") && library) {
         library->showSavedSongs();
+    } else if (command == QLatin1StringView("stats") && library) {
+        library->showStats();
     } else if (command == QLatin1StringView("local-files") && library) {
         library->showLocalFiles();
     } else if (command == QLatin1StringView("local-tracks") && library) {

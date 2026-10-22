@@ -15,6 +15,8 @@ Item {
     /// the panel is coming or going, so sizes ease rather than jump
     property bool animateLayout: false
     property MaterialScheme scheme: PlayerStyle.darkScheme
+    property real controlsOpacity: 1
+    readonly property real controlsShift: compactHorizontal ? 0 : Math.round((transport.implicitHeight + volume.implicitHeight + details.spacing * 2) / 2)
 
     readonly property bool showsRing: Settings.visualizersEnabled && Settings.immersiveVisualizer && Settings.circularVisualizer
     /// round inside the ring, or round on its own with visualizers off
@@ -147,7 +149,7 @@ Item {
                 kind: SpectrumView.Ring
                 wave: Settings.visualizerShape === "wave"
                 sensitivity: Settings.visualizerSensitivity
-                active: Player.playing
+                active: Player.playing && root.showsRing
                 // the bars rise from under the cover and are cut along its
                 // squiggle line, so they start where the line is
                 cutWaves: cover.showsSquiggle ? cover.squiggleWaves : 0
@@ -221,21 +223,31 @@ Item {
                     animateChange: !metadataFade.running
                 }
 
-                Row {
+                Item {
+                    id: artistLine
                     anchors.horizontalCenter: parent.horizontalCenter
-                    spacing: 5
+                    width: parent.width
+                    implicitHeight: Math.max(artistText.implicitHeight, more.height, 28)
 
-                    StyledText {
+                    ScrollingText {
+                        id: artistText
+                        objectName: "immersiveArtist"
+                        anchors.horizontalCenter: parent.horizontalCenter
                         anchors.verticalCenter: parent.verticalCenter
-                        width: Math.min(implicitWidth, metadata.width - more.width - 5)
+                        width: Math.min(implicitWidth + 1, parent.width - (more.width + 6) * 2)
                         text: root.shownSong.artists
-                        elide: Text.ElideRight
+                        horizontalAlignment: Text.AlignHCenter
                         font.pixelSize: Appearance.fontSize.larger
                         font.weight: Font.Medium
                         color: Qt.rgba(1, 1, 1, 0.62)
+                        animateChange: !metadataFade.running
                     }
+
                     IconButton {
                         id: more
+                        objectName: "immersiveMoreButton"
+                        anchors.left: artistText.right
+                        anchors.leftMargin: 4
                         anchors.verticalCenter: parent.verticalCenter
                         scheme: root.scheme
                         symbol: "more_horiz"
@@ -245,17 +257,19 @@ Item {
                         colBackgroundHover: Qt.rgba(1, 1, 1, 0.1)
                         tooltip: qsTr("More")
                         onClicked: SongMenus.open(Player.currentSong, false)
+                        opacity: root.controlsOpacity
+                        enabled: root.controlsOpacity > 0
                     }
                 }
 
-                StyledText {
+                ScrollingText {
                     width: parent.width
                     visible: root.shownSong.albumName.length > 0
                     text: root.shownSong.albumName
                     horizontalAlignment: Text.AlignHCenter
-                    elide: Text.ElideRight
                     font.pixelSize: Appearance.fontSize.smallie
                     color: Qt.rgba(1, 1, 1, 0.4)
+                    animateChange: !metadataFade.running
                 }
             }
 
@@ -302,6 +316,8 @@ Item {
                 objectName: "immersiveTransport"
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: root.compactHorizontal ? Math.max(8, Math.min(28, (details.width - 196) / 4)) : 28
+                opacity: root.controlsOpacity
+                enabled: root.controlsOpacity > 0
 
 
                 Control {
@@ -377,6 +393,8 @@ Item {
                 id: volume
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: 10
+                opacity: root.controlsOpacity
+                enabled: root.controlsOpacity > 0
 
                 IconButton {
                     anchors.verticalCenter: parent.verticalCenter

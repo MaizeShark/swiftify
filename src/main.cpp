@@ -12,6 +12,8 @@
 #include "library/LocalLibrary.h"
 #include "playback/PlaybackController.h"
 #include "render/SpectrumSource.h"
+#include "stats/PlayHistory.h"
+#include "stats/StatsStore.h"
 #include "spotify/CredentialStore.h"
 #include "spotify/SpotifySession.h"
 #include "system/SingleInstance.h"
@@ -319,6 +321,9 @@ int main(int argc, char *argv[])
     ArtworkCache artwork(&network);
     PlayerStyle playerStyle(&player, &theme, &artwork);
     SpectrumSource spectrum(&core, &player);
+    PlayHistory listeningHistory(PlayHistory::defaultPath());
+    PlayTracker listeningTracker(&player, &listeningHistory);
+    StatsStore stats(&settings, &session, &network, &listeningHistory, &listeningTracker);
 
     QObject::connect(&instance, &SingleInstance::commandReceived, &app, &AppController::handleCommand);
     instance.listen();

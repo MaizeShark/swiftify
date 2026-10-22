@@ -676,7 +676,7 @@ ApplicationWindow {
         objectName: "appWindowControls"
         x: Settings.windowControlsOnRight ? parent.width - width - 12 : 12
         y: 8
-        visible: window.inAppWindowControls
+        visible: window.inAppWindowControls && window.visibility !== Window.FullScreen
         compact: true
         scheme: window.immersiveReveal > 0 ? PlayerStyle.darkScheme : Appearance.colors
         window: window
@@ -758,7 +758,9 @@ ApplicationWindow {
     Binding {
         target: Player
         property: "visualizerPresentationActive"
-        value: window.visible
+        value: window.visible && (UiState.immersiveOpen
+               ? Settings.immersiveVisualizer || Settings.livingBackdrop
+               : Settings.playerBarVisualizer || Settings.trackListVisualizer)
     }
 
     // closing the window leaves the music playing; the tray brings it back.
@@ -872,6 +874,8 @@ ApplicationWindow {
 
     Shortcut { sequences: [StandardKey.Find]; enabled: !App.macOS; onActivated: topBar.focusSearch() }
 
+    Shortcut { sequences: ["Ctrl+K", "Ctrl+L"]; enabled: !App.macOS; onActivated: topBar.openCatalogueSearch()}
+
     // spelled out rather than StandardKey.ZoomIn, which holds ctrl + too: the
     // same key twice in one shortcut is ambiguous, and neither acts
     Shortcut { sequences: ["Ctrl++", "Ctrl+="]; onActivated: window.setZoom(window.zoom + window.zoomStep) }
@@ -883,6 +887,7 @@ ApplicationWindow {
         sourceComponent: MacMenuBar {
             window: window
             onFindRequested: topBar.focusSearch()
+            onCatalogueSearchRequested: topBar.openCatalogueSearch()
             // the settings first, if they are open over the window
             onCloseWindowRequested: {
                 const open = settings.item as SettingsDialog

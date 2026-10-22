@@ -24,9 +24,6 @@ first image shows equalizer, tempo and pitch settings. second picture shows how 
   </tr>
 </table>
 
-> ### Note
-> i will probably not be maintaining it, if you are interested in taking over this project you can send me an email
-
 - [Before you start](#before-you-start)
 - [Prebuilt builds](#prebuilt-builds)
 - [Building from source](#building-from-source)
@@ -34,6 +31,7 @@ first image shows equalizer, tempo and pitch settings. second picture shows how 
   - [macOS](#macos)
   - [Linux](#linux)
   - [Windows](#windows)
+- [Stats](#stats)
 - [Command line](#command-line)
 
 ## Before you start
@@ -89,17 +87,21 @@ For more verbose logging run swiftify with `QT_LOGGING_RULES="swiftify.discord.d
 
 ## Prebuilt builds
 
-[releases](https://github.com/shredos67/swiftify/releases) have windows and linux x86_64 builds.
+[releases](https://github.com/shredos67/swiftify/releases) have windows and linux x86_64 builds,
+and a macos dmg for apple silicon.
 
 - **windows.** unzip it anywhere and run `bin\swiftify.exe`.
 - **linux.** unpack it anywhere and run `bin/swiftify`. it brings its own Qt, but needs
   alsa and libsecret, which pretty much every desktop already has.
+- **macos.** needs macos 14.4 or newer. open the dmg and drag swiftify into applications.
+  its signed ad hoc, so the first launch gets blocked, open it anyway from system settings ›
+  privacy & security, or run `xattr -dr com.apple.quarantine /Applications/Swiftify.app`.
 
 ## Building from source
 
 ### Build requirements
 
-- Qt 6.9 or newer: Qt Base, Qt Declarative and Qt Shader Tools, and on linux Qt WebSockets (for soloist)
+- Qt 6.10 or newer: Qt Base, Qt Declarative and Qt Shader Tools, and on linux Qt WebSockets (for soloist)
 - QtKeychain and QCoro 0.10 or newer, both built for Qt 6
 - CMake 3.24 or newer, Ninja, and a C++20 compiler
 - Rust (stable, from [rustup](https://rustup.rs))
@@ -153,7 +155,7 @@ cmake --build build
 cmake --install build
 ```
 
-on debian/ubuntu (or derivatives with Qt 6.8), use the build script that handles
+on debian/ubuntu (or derivatives with Qt 6.8 or 6.9), use the build script that handles
 compatibility patches automatically:
 
 ```sh
@@ -175,9 +177,9 @@ cd swiftify
 ./tools/build-debian.sh --install-deps
 ```
 
-anywhere else, install the same reqs (Qt 6.9+ with D-Bus, OpenGL and Wayland, QtKeychain
+anywhere else, install the same reqs (Qt 6.10+ with D-Bus, OpenGL and Wayland, QtKeychain
 and QCoro for Qt 6, libpulse, plus the ALSA, OpenSSL and pkg-config dev packages), then
-run the cmake commands above. if you have Qt 6.8, use `tools/build-debian.sh` which
+run the cmake commands above. if you have Qt 6.8 or 6.9, use `tools/build-debian.sh` which
 applies the necessary compatibility patches.
 
 `cmake --install` drops `swiftify` in `~/.local/bin` (make sure that's on your `PATH`)
@@ -194,7 +196,7 @@ the tray. `-DSWIFTIFY_DESKTOP_INTEGRATION=OFF` turns those off.
 
 **because most Windows users cant even use their own OS, i made a script that handles building so it's as simple as possible :)**
 
-first install Qt 6.9+ with *Qt Shader Tools*, CMake and Ninja from the Qt online installer,
+first install Qt 6.10+ with *Qt Shader Tools*, CMake and Ninja from the Qt online installer,
 Rust from [rustup](https://rustup.rs), and Git. choose either Qt for *MSVC 2022 64-bit*
 with Visual Studio 2022 17.1+ (or Build Tools) and its *Desktop development with C++*
 workload, or Qt for *MinGW 64-bit* with its matching MinGW toolchain.
@@ -211,7 +213,7 @@ for a different Qt kit, toolchain location or install directory, pass overrides:
 
 ```powershell
 .\tools\build-windows.ps1 -QtPath 'C:\Qt\6.11.2\msvc2022_64'
-.\tools\build-windows.ps1 -QtPath 'C:\Qt\6.9.3\mingw_64' -MingwPath 'C:\Qt\Tools\mingw1310_64\bin' -InstallPrefix "$env:LOCALAPPDATA\Programs\Swiftify"
+.\tools\build-windows.ps1 -QtPath 'C:\Qt\6.10.3\mingw_64' -MingwPath 'C:\Qt\Tools\mingw1310_64\bin' -InstallPrefix "$env:LOCALAPPDATA\Programs\Swiftify"
 ```
 
 adjust the example paths to your installed versions, MinGW must match your Qt
@@ -246,6 +248,23 @@ start the installed app with:
 font downloads are hash-checked on every configure; on Windows, a failed CMake
 download is retried with `curl.exe` using the system certificate store.
 
+
+## Stats
+
+the Stats page (in the sidebar, or `swiftify --stats`) shows what you've been listening to,
+like the [listening-stats](https://github.com/HeadshotInteractive/listening-stats) spicetify app:
+listening time, plays, top songs, artists, albums and genres, when in the day and the week you
+listen, a calendar of the last year, and your recent plays. pick a period (today, 4 weeks,
+6 months, all time) and rank by plays or by time.
+
+it reads from either:
+
+- **stats.fm**, by username. your profile's stats have to be public; nothing else is needed.
+- **this computer**: every song you listen to for 30 seconds or more (or half of a shorter one)
+  gets kept in `listening-history.jsonl` in swiftify's data folder, and never leaves it. genres
+  come from spotify through your library login. you can export the history as csv, or turn
+  tracking off, under Settings → Listening Stats.
+
 ## Command line
 
 only one swiftify runs at a time. launching it again just passes the command to the one
@@ -257,6 +276,7 @@ that's already running, so these work great as keybinds:
 | `--play-pause` | play or pause |
 | `--next` | next song |
 | `--previous` | previous song |
+| `--stats` | open the stats page |
 
 on hyprland for example:
 

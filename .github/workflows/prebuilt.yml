@@ -1,6 +1,7 @@
-# prebuilt windows and linux x86_64 builds. a v tag (v0.10.0) builds both and
-# puts them on a draft release to publish by hand. it also runs from the
-# actions tab, and on pull requests that change how the builds are made
+# prebuilt windows and linux x86_64 builds and a macos arm64 dmg. a v tag
+# (v0.10.0) builds all three and puts them on a draft release to publish by
+# hand. it also runs from the actions tab, and on pull requests that change how
+# the builds are made
 name: prebuilt
 
 on:
@@ -12,6 +13,7 @@ on:
       - .github/workflows/prebuilt.yml
       - tools/build-windows.ps1
       - tools/build-linux-tarball.sh
+      - tools/build-macos-dmg.sh
 
 permissions:
   contents: read
@@ -119,13 +121,25 @@ jobs:
             exit 1
           fi
 
+      # clang 18 from llvm's own repository, as ubuntu 22.04 stops at clang 15.
+      # its key is checked against the fingerprint llvm publishes
+      - name: llvm
+        run: |
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key -o "$RUNNER_TEMP/llvm.asc"
+          gpg --show-keys --with-colons "$RUNNER_TEMP/llvm.asc" \
+            | grep -q '^fpr:::::::::6084F3CF814B57C1CF12EFD515CF4D18AF4F7421:$' \
+            || { echo "llvm's apt key does not match its fingerprint" >&2; exit 1; }
+          gpg --dearmor < "$RUNNER_TEMP/llvm.asc" | sudo tee /usr/share/keyrings/llvm.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] https://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list
+
       # build and bundling dependencies. the xcb, wayland and vulkan libraries
       # are what qt's plugins link, linuxdeploy has to find them to bundle them
       - name: packages
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            g++-12 ninja-build pkg-config \
+            g++-12 clang-18 ninja-build pkg-config \
             libpulse-dev libasound2-dev libssl-dev libsecret-1-dev \
             libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 \
             libfontconfig1-dev libfreetype-dev libdbus-1-dev \
@@ -141,10 +155,15 @@ jobs:
           modules: qtshadertools qtwebsockets
           cache: true
 
+      # clang held to gcc 12's standard library, so it still runs on older
+      # distros. gcc 12 miscompiles some coroutines, and the tarball it built
+      # corrupted its heap on linux
       - name: build
         env:
-          CC: gcc-12
-          CXX: g++-12
+          CC: clang-18
+          CXX: clang++-18
+          CFLAGS: --gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/12
+          CXXFLAGS: --gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/12
         run: ./tools/build-linux-tarball.sh --qt "$QT_ROOT_DIR" --out dist
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -153,9 +172,42 @@ jobs:
           path: dist/*.tar.gz
           if-no-files-found: error
 
+  macos:
+    # apple silicon with xcode 27. the icon uses icon composer features xcode
+    # 26's actool can't open. the image is still a preview
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: version
+        run: |
+          version="$(sed -n '/^project(Swiftify/,/VERSION/s/^ *VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)"
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "the tag $GITHUB_REF_NAME does not match the version $version in CMakeLists.txt" >&2
+            exit 1
+          fi
+
+      - uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
+        with:
+          version: 6.12.0
+          host: mac
+          target: desktop
+          arch: clang_64
+          modules: qtshadertools
+          cache: true
+
+      - name: build
+        run: ./tools/build-macos-dmg.sh --qt "$QT_ROOT_DIR" --out dist
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos
+          path: dist/*.dmg
+          if-no-files-found: error
+
   release:
     if: github.ref_type == 'tag'
-    needs: [windows, linux]
+    needs: [windows, linux, macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

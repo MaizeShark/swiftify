@@ -66,7 +66,7 @@ Item {
                     burst: "play"
                     text: qsTr("Play")
                     enabled: Library.displayedPlaylistSongs.count > 0
-                    onClicked: Player.playFromModel(Library.displayedPlaylistSongs, 0)
+                    onClicked: Player.playInOrder(Library.displayedPlaylistSongs)
                 },
                 // play's twin in the primary's softer tone
                 TextButton {

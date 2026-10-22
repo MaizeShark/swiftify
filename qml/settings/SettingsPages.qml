@@ -78,19 +78,20 @@ Item {
                     onToggledTo: (checked) => Settings.visualizersEnabled = checked
                 }
                 ConfigSwitch {
-                    text: "Player bar"
+                    text: qsTr("Player bar visualizer")
                     enabled: Settings.visualizersEnabled
                     checked: Settings.playerBarVisualizer
                     onToggledTo: (checked) => Settings.playerBarVisualizer = checked
                 }
                 ConfigSwitch {
-                    text: "Track list"
+                    text: qsTr("Track list visualizer")
                     enabled: Settings.visualizersEnabled
                     checked: Settings.trackListVisualizer
                     onToggledTo: (checked) => Settings.trackListVisualizer = checked
                 }
                 ConfigSwitch {
-                    text: "Now playing screen"
+                    objectName: "immersiveVisualizerSwitch"
+                    text: qsTr("Full-screen player visualizer")
                     enabled: Settings.visualizersEnabled
                     checked: Settings.immersiveVisualizer
                     onToggledTo: (checked) => Settings.immersiveVisualizer = checked
@@ -104,6 +105,17 @@ Item {
                         Segment { text: qsTr("Circular") }
                     ]
                     onActivated: (index) => Settings.circularVisualizer = index === 1
+                }
+                ConfigSelection {
+                    text: qsTr("Layout")
+                    // the ring stays mirrored
+                    enabled: Settings.visualizersEnabled && Settings.immersiveVisualizer && !Settings.circularVisualizer
+                    currentIndex: Settings.continuousVisualizer ? 1 : 0
+                    segments: [
+                        Segment { text: qsTr("Mirrored") },
+                        Segment { text: qsTr("Continuous") }
+                    ]
+                    onActivated: (index) => Settings.continuousVisualizer = index === 1
                 }
                 ConfigSelection {
                     text: qsTr("Shape")
@@ -525,45 +537,6 @@ Item {
         Page {
             visible: root.page === 6
 
-
-            ContentSection {
-                title: "Discord Rich Presence"
-                symbol: "share"
-
-                ConfigSwitch {
-                    text: qsTr("Share listening activity")
-                    checked: Settings.discordEnabled
-                    onToggledTo: (checked) => Settings.discordEnabled = checked
-                }
-                OutlinedTextField {
-                    id: discordId
-                    x: 8
-                    width: Math.min(460, parent.width - 16)
-                    placeholder: qsTr("Discord Application ID")
-                    text: Settings.discordApplicationId
-                    onAccepted: Settings.discordApplicationId = text
-                    Connections {
-                        target: discordId.inputItem
-                        function onActiveFocusChanged() {
-                            if (!discordId.inputItem.activeFocus) Settings.discordApplicationId = discordId.text
-                        }
-                    }
-                }
-                NoteText {
-                    text: discordId.text.length > 0 && !/^[0-9]{17,20}$/.test(discordId.text.trim())
-                        ? qsTr("Enter a valid numeric Application ID (17–20 digits).")
-                        : !Settings.discordEnabled ? qsTr("Listening activity is private. Enable to share track, artist and progress with Discord.")
-                        : Settings.discordApplicationId.length === 0 ? qsTr("Create an application in the Discord Developer Portal and paste its Application ID above. No token or secret is needed.")
-                        : Discord.status
-                }
-                TextButton {
-                    x: 8
-                    text: qsTr("Open Discord Developer Portal")
-                    variant: TextButton.Text
-                    onClicked: Qt.openUrlExternally("https://discord.com/developers/applications")
-                }
-            }
-
             ContentSection {
                 title: qsTr("Spotify Connect")
                 symbol: "cast"
@@ -698,6 +671,34 @@ Item {
             }
 
             ContentSection {
+                title: qsTr("Playback")
+                symbol: "play_circle"
+
+                StatusRow {
+                    label: qsTr("Status")
+                    value: Session.connected ? qsTr("Connected") : qsTr("Not connected")
+                    good: Session.connected
+                }
+                Flow {
+                    x: 8
+                    width: parent.width - 16
+                    spacing: 8
+                    topPadding: 4
+
+                    TextButton {
+                        variant: TextButton.Tonal
+                        symbol: "play_circle"
+                        text: Session.connected ? qsTr("Reconnect Playback") : qsTr("Connect Playback")
+                        enabled: !Session.loginInProgress
+                        onClicked: Session.beginPlaybackLogin()
+                    }
+                }
+                NoteText {
+                    text: qsTr("playing music needs a Spotify Premium login of its own, separate from the librarys")
+                }
+            }
+
+            ContentSection {
                 title: qsTr("Library")
                 symbol: "library_music"
 
@@ -735,13 +736,78 @@ Item {
             }
 
             ContentSection {
-                title: qsTr("Playback")
-                symbol: "play_circle"
+                title: "Discord Rich Presence"
+                symbol: "share"
 
-                StatusRow {
-                    label: qsTr("Status")
-                    value: Session.connected ? qsTr("Connected") : qsTr("Not connected")
-                    good: Session.connected
+                ConfigSwitch {
+                    text: qsTr("Share listening activity")
+                    checked: Settings.discordEnabled
+                    onToggledTo: (checked) => Settings.discordEnabled = checked
+                }
+                OutlinedTextField {
+                    id: discordId
+                    x: 8
+                    width: Math.min(460, parent.width - 16)
+                    placeholder: qsTr("Discord Application ID")
+                    text: Settings.discordApplicationId
+                    onAccepted: Settings.discordApplicationId = text
+                    Connections {
+                        target: discordId.inputItem
+                        function onActiveFocusChanged() {
+                            if (!discordId.inputItem.activeFocus) Settings.discordApplicationId = discordId.text
+                        }
+                    }
+                }
+                NoteText {
+                    text: discordId.text.length > 0 && !/^[0-9]{17,20}$/.test(discordId.text.trim())
+                        ? qsTr("Enter a valid numeric Application ID (17–20 digits).")
+                        : !Settings.discordEnabled ? qsTr("Listening activity is private. Enable to share track, artist and progress with Discord.")
+                            : Settings.discordApplicationId.length === 0 ? qsTr("Create an application in the Discord Developer Portal and paste its Application ID above. No token or secret is needed.")
+                                : Discord.status
+                }
+                TextButton {
+                    x: 8
+                    text: qsTr("Open Discord Developer Portal")
+                    variant: TextButton.Text
+                    onClicked: Qt.openUrlExternally("https://discord.com/developers/applications")
+                }
+            }
+
+            ContentSection {
+                title: qsTr("Listening Stats")
+                symbol: "insights"
+
+                ConfigSelection {
+                    text: qsTr("Stats from")
+                    currentIndex: Stats.source === "statsfm" ? 0 : 1
+                    segments: [
+                        Segment { text: "stats.fm" },
+                        Segment { text: qsTr("This computer") }
+                    ]
+                    onActivated: (index) => Stats.source = index === 0 ? "statsfm" : "local"
+                }
+                OutlinedTextField {
+                    id: statsFmUsername
+                    x: 8
+                    width: Math.min(460, parent.width - 16)
+                    placeholder: qsTr("stats.fm username")
+                    text: Stats.username
+                    onAccepted: Stats.username = text
+
+                    // kept on leaving the field too, not on every key
+                    Connections {
+                        target: statsFmUsername.inputItem
+                        function onActiveFocusChanged() {
+                            if (!statsFmUsername.inputItem.activeFocus) {
+                                Stats.username = statsFmUsername.text
+                            }
+                        }
+                    }
+                }
+                ConfigSwitch {
+                    text: qsTr("Keep track of what I listen to")
+                    checked: Stats.tracking
+                    onToggledTo: (checked) => Stats.tracking = checked
                 }
                 Flow {
                     x: 8
@@ -751,14 +817,17 @@ Item {
 
                     TextButton {
                         variant: TextButton.Tonal
-                        symbol: "play_circle"
-                        text: Session.connected ? qsTr("Reconnect Playback") : qsTr("Connect Playback")
-                        enabled: !Session.loginInProgress
-                        onClicked: Session.beginPlaybackLogin()
+                        symbol: "download"
+                        text: qsTr("Export History")
+                        enabled: Stats.historyCount > 0
+                        onClicked: {
+                            const path = Stats.exportHistory()
+                            UiState.toastRequested(path.length > 0 ? qsTr("Saved to %1").arg(path) : qsTr("Could not export the history"))
+                        }
                     }
                 }
                 NoteText {
-                    text: qsTr("playing music needs a Spotify Premium login of its own, separate from the librarys")
+                    text: qsTr("stats.fm reads a public profile by its username, nothing else. the stats from this computer count songs heard for 30 seconds or more (%1 so far), kept only on this computer; their genres come from your Spotify library login.").arg(Stats.historyCount)
                 }
             }
         }

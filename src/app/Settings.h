@@ -24,6 +24,7 @@ class Settings : public QObject {
     Q_PROPERTY(bool trackListVisualizer READ trackListVisualizer WRITE setTrackListVisualizer NOTIFY trackListVisualizerChanged FINAL)
     Q_PROPERTY(bool immersiveVisualizer READ immersiveVisualizer WRITE setImmersiveVisualizer NOTIFY immersiveVisualizerChanged FINAL)
     Q_PROPERTY(bool circularVisualizer READ circularVisualizer WRITE setCircularVisualizer NOTIFY circularVisualizerChanged FINAL)
+    Q_PROPERTY(bool continuousVisualizer READ continuousVisualizer WRITE setContinuousVisualizer NOTIFY continuousVisualizerChanged FINAL)
     /// the players' covers round, with their squiggle edge, while visualizers
     /// are off; with them on, the circular style rounds them
     Q_PROPERTY(bool roundArtwork READ roundArtwork WRITE setRoundArtwork NOTIFY roundArtworkChanged FINAL)
@@ -55,6 +56,11 @@ class Settings : public QObject {
     Q_PROPERTY(QString matugenColorsPath READ matugenColorsPath WRITE setMatugenColorsPath NOTIFY matugenColorsPathChanged FINAL)
     Q_PROPERTY(bool showWindowControls READ showWindowControls WRITE setShowWindowControls NOTIFY showWindowControlsChanged FINAL)
     Q_PROPERTY(bool windowControlsOnRight READ windowControlsOnRight WRITE setWindowControlsOnRight NOTIFY windowControlsOnRightChanged FINAL)
+    /// where the stats page reads from: "statsfm" or "local"
+    Q_PROPERTY(QString statsSource READ statsSource WRITE setStatsSource NOTIFY statsSourceChanged FINAL)
+    Q_PROPERTY(QString statsFmUsername READ statsFmUsername WRITE setStatsFmUsername NOTIFY statsFmUsernameChanged FINAL)
+    /// whether songs played here are kept for the local stats
+    Q_PROPERTY(bool trackListening READ trackListening WRITE setTrackListening NOTIFY trackListeningChanged FINAL)
     Q_PROPERTY(bool nativeTitleBar READ nativeTitleBar WRITE setNativeTitleBar NOTIFY nativeTitleBarChanged FINAL)
     Q_PROPERTY(bool trayIcon READ trayIcon WRITE setTrayIcon NOTIFY trayIconChanged FINAL)
     /// the whole window's zoom, as ctrl + and ctrl - set it
@@ -99,6 +105,9 @@ public:
     /// ring around round artwork instead of a band of bars
     bool circularVisualizer() const { return m_circularVisualizer; }
     void setCircularVisualizer(bool value);
+    /// the immersive band as one row from bass to treble instead of mirrored
+    bool continuousVisualizer() const { return m_continuousVisualizer; }
+    void setContinuousVisualizer(bool value);
     bool roundArtwork() const { return m_roundArtwork; }
     void setRoundArtwork(bool value);
     /// bars or wave. stored under its first name, from when it applied to the ring alone
@@ -154,6 +163,12 @@ public:
     bool showWindowControls() const { return m_showWindowControls; }
     void setShowWindowControls(bool value);
     bool windowControlsOnRight() const { return m_windowControlsOnRight; }
+    QString statsSource() const { return m_statsSource; }
+    void setStatsSource(const QString &value);
+    QString statsFmUsername() const { return m_statsFmUsername; }
+    void setStatsFmUsername(const QString &value);
+    bool trackListening() const { return m_trackListening; }
+    void setTrackListening(bool value);
     void setWindowControlsOnRight(bool value);
     bool nativeTitleBar() const { return m_nativeTitleBar; }
     void setNativeTitleBar(bool value);
@@ -179,6 +194,7 @@ signals:
     void trackListVisualizerChanged();
     void immersiveVisualizerChanged();
     void circularVisualizerChanged();
+    void continuousVisualizerChanged();
     void roundArtworkChanged();
     void visualizerShapeChanged();
     void visualizerSensitivityChanged();
@@ -202,6 +218,9 @@ signals:
     void matugenColorsPathChanged();
     void showWindowControlsChanged();
     void windowControlsOnRightChanged();
+    void statsSourceChanged();
+    void statsFmUsernameChanged();
+    void trackListeningChanged();
     void nativeTitleBarChanged();
     void trayIconChanged();
     void zoomChanged();
@@ -221,6 +240,7 @@ private:
     bool m_trackListVisualizer = true;
     bool m_immersiveVisualizer = true;
     bool m_circularVisualizer = false;
+    bool m_continuousVisualizer = false;
     bool m_roundArtwork = false;
     QString m_visualizerShape = QStringLiteral("bars");
     double m_visualizerSensitivity = 1.0;
@@ -244,6 +264,9 @@ private:
     QString m_matugenColorsPath = QString();
     bool m_showWindowControls = true;
     bool m_windowControlsOnRight = false;
+    QString m_statsSource = QStringLiteral("local");
+    QString m_statsFmUsername;
+    bool m_trackListening = true;
 #ifdef Q_OS_WIN
     bool m_nativeTitleBar = false;
 #else

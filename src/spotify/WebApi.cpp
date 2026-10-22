@@ -218,6 +218,9 @@ QCoro::Task<QList<Playlist>> WebApi::playlists(QString accessToken)
 
 namespace {
 
+/// the account's own market, so spotify says which tracks it will play there
+const std::pair<QString, QString> kMarket {QStringLiteral("market"), QStringLiteral("from_token")};
+
 void appendWrappedTracks(QList<Song> &songs, const QJsonObject &page)
 {
     for (const QJsonValue &value : page.value(QStringLiteral("items")).toArray()) {
@@ -233,7 +236,8 @@ QCoro::Task<QList<Song>> WebApi::playlistSongs(QString playlistId, QString acces
 {
     QList<Song> result;
     const QUrlQuery query {{QStringLiteral("limit"), QStringLiteral("50")},
-                           {QStringLiteral("additional_types"), QStringLiteral("track")}};
+                           {QStringLiteral("additional_types"), QStringLiteral("track")},
+                           kMarket};
     co_await collectOffsetPages(QStringLiteral("/v1/playlists/%1/items").arg(playlistId), query, accessToken,
                                 [&result](const QJsonObject &page) { appendWrappedTracks(result, page); });
     co_return result;
@@ -242,7 +246,7 @@ QCoro::Task<QList<Song>> WebApi::playlistSongs(QString playlistId, QString acces
 QCoro::Task<QList<Song>> WebApi::savedSongs(QString accessToken)
 {
     QList<Song> result;
-    const QUrlQuery requestQuery;
+    const QUrlQuery requestQuery {kMarket};
     co_await collectOffsetPages(QStringLiteral("/v1/me/tracks"), requestQuery, accessToken,
                                 [&result](const QJsonObject &page) { appendWrappedTracks(result, page); });
     co_return result;
@@ -272,7 +276,8 @@ QCoro::Task<SearchResults> WebApi::search(QString query, QString accessToken)
 {
     const QUrlQuery requestQuery = QUrlQuery {{QStringLiteral("q"), query},
                                                        {QStringLiteral("type"), QStringLiteral("track,album,artist,playlist")},
-                                                       {QStringLiteral("limit"), QStringLiteral("10")}};
+                                                       {QStringLiteral("limit"), QStringLiteral("10")},
+                                                       kMarket};
     const QJsonObject response = (co_await requestJson(
         apiUrl(QStringLiteral("/v1/search"), requestQuery),
         "GET", accessToken)).object();
@@ -301,7 +306,7 @@ QCoro::Task<SearchResults> WebApi::search(QString query, QString accessToken)
 
 QCoro::Task<Song> WebApi::song(QString trackId, QString accessToken)
 {
-    const QJsonDocument document = co_await requestJson(apiUrl(QStringLiteral("/v1/tracks/%1").arg(trackId)), "GET", accessToken);
+    const QJsonDocument document = co_await requestJson(apiUrl(QStringLiteral("/v1/tracks/%1").arg(trackId), QUrlQuery {kMarket}), "GET", accessToken);
     const auto song = json::track(document.object());
     if (!song) {
         throw SpotifyError::invalidData(QStringLiteral("Spotify returned an unsupported track."));
@@ -312,7 +317,7 @@ QCoro::Task<Song> WebApi::song(QString trackId, QString accessToken)
 QCoro::Task<QList<Song>> WebApi::albumSongs(Album album, QString accessToken)
 {
     QList<Song> result;
-    const QUrlQuery requestQuery = QUrlQuery {{QStringLiteral("limit"), QStringLiteral("50")}};
+    const QUrlQuery requestQuery = QUrlQuery {{QStringLiteral("limit"), QStringLiteral("50")}, kMarket};
     co_await collectPages(apiUrl(QStringLiteral("/v1/albums/%1/tracks").arg(album.id), requestQuery),
                           accessToken, [&result, &album](const QJsonObject &page) {
         for (const QJsonValue &value : page.value(QStringLiteral("items")).toArray()) {
@@ -338,6 +343,36 @@ QCoro::Task<QList<Album>> WebApi::artistAlbums(Artist artist, QString accessToke
             }
         }
     });
+    co_return result;
+}
+
+QCoro::Task<QHash<QString, QStringList>> WebApi::artistGenres(QStringList artistIds, QString accessToken,
+                                                              QHash<QString, QUrl> *artwork)
+{
+    QHash<QString, QStringList> result;
+    // fifty at a time is as many as spotify takes
+    for (qsizetype start = 0; start < artistIds.size(); start += 50) {
+        const QUrlQuery query {{QStringLiteral("ids"), artistIds.mid(start, 50).join(u',')}};
+        const QJsonDocument document = co_await requestJson(apiUrl(QStringLiteral("/v1/artists"), query), "GET", accessToken);
+        for (const QJsonValue &value : document.object().value(QStringLiteral("artists")).toArray()) {
+            const QJsonObject object = value.toObject();
+            const QString id = object.value(QStringLiteral("id")).toString();
+            if (id.isEmpty()) {
+                continue;
+            }
+            QStringList genres;
+            for (const QJsonValue &genre : object.value(QStringLiteral("genres")).toArray()) {
+                genres.append(genre.toString());
+            }
+            result.insert(id, genres);
+            if (artwork) {
+                const QUrl image = json::preferredArtworkUrl(object.value(QStringLiteral("images")).toArray(), 320);
+                if (image.isValid()) {
+                    artwork->insert(id, image);
+                }
+            }
+        }
+    }
     co_return result;
 }
 

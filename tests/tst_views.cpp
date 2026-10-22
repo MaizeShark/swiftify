@@ -150,6 +150,34 @@ private:
     using Rig = swiftify::testing::ViewRig;
 
 private slots:
+    void fullScreenVisualizerCanBeDisabledIndependently()
+    {
+        Rig rig;
+        rig.playSomething();
+        rig.settings.setVisualizersEnabled(true);
+        rig.settings.setImmersiveVisualizer(true);
+        const auto immersive = rig.show(QStringLiteral("ImmersivePlayer"));
+        QVERIFY(immersive);
+        QCOMPARE(immersive->property("showsSpectrum").toBool(), true);
+        const auto sound = rig.show(QStringLiteral("SoundPanel"));
+        QVERIFY(sound);
+        auto *toggle = sound->findChild<QObject *>(QStringLiteral("immersiveVisualizerQuickSwitch"));
+        QVERIFY(toggle);
+        QCOMPARE(toggle->property("checked").toBool(), true);
+        toggle->setProperty("checked", false);
+        QVERIFY(QMetaObject::invokeMethod(toggle, "toggled"));
+        QVERIFY(!rig.settings.immersiveVisualizer());
+        QCOMPARE(immersive->property("showsSpectrum").toBool(), false);
+        auto *equalizerSpectrum = sound->findChild<QObject *>(QStringLiteral("immersiveEqualizerSpectrum"));
+        QVERIFY(equalizerSpectrum);
+        QCOMPARE(equalizerSpectrum->property("visible").toBool(), false);
+        QCOMPARE(equalizerSpectrum->property("active").toBool(), false);
+        QVERIFY(rig.settings.visualizersEnabled());
+        rig.settings.setImmersiveVisualizer(true);
+        Rig::settle();
+        QCOMPARE(toggle->property("checked").toBool(), true);
+    }
+
     void languageSelectionRetranslatesTheSettings()
     {
         Rig rig;
@@ -270,6 +298,145 @@ private slots:
         QVERIFY(panel);
         QCOMPARE(panel->width(), player->property("rowSpace").toDouble());
         QVERIFY(panel->x() >= 0);
+    }
+
+    void immersivePlayerDistractionFreeMode()
+    {
+        Rig rig;
+        rig.playSomething();
+        const auto player = rig.show(QStringLiteral("ImmersivePlayer"));
+        QVERIFY(player);
+        auto *close = player->findChild<QQuickItem *>(QStringLiteral("immersiveCloseButton"));
+        auto *dfButton = player->findChild<QQuickItem *>(QStringLiteral("immersiveDistractionFreeButton"));
+        auto *transport = player->findChild<QQuickItem *>(QStringLiteral("immersiveTransport"));
+        auto *nowPlaying = player->findChild<QQuickItem *>(QStringLiteral("immersiveNowPlaying"));
+        auto *seek = player->findChild<QQuickItem *>(QStringLiteral("immersiveSeek"));
+        auto *artwork = player->findChild<QQuickItem *>(QStringLiteral("immersiveArtwork"));
+        auto *title = player->findChild<QQuickItem *>(QStringLiteral("immersiveTitle"));
+        auto *artist = player->findChild<QQuickItem *>(QStringLiteral("immersiveArtist"));
+        auto *more = player->findChild<QQuickItem *>(QStringLiteral("immersiveMoreButton"));
+        auto *timer = player->findChild<QObject *>(QStringLiteral("inactivityTimer"));
+        QVERIFY(close);
+        QVERIFY(dfButton);
+        QVERIFY(transport);
+        QVERIFY(nowPlaying);
+        QVERIFY(seek);
+        QVERIFY(artwork);
+        QVERIFY(title);
+        QVERIFY(artist);
+        QVERIFY(more);
+        QVERIFY(timer);
+
+        // Artist text is horizontally centered with title, and more button sits to its right
+        const qreal titleCenter = title->mapToItem(nowPlaying, QPointF(title->width() / 2.0, 0)).x();
+        const qreal artistCenter = artist->mapToItem(nowPlaying, QPointF(artist->width() / 2.0, 0)).x();
+        QVERIFY(std::abs(titleCenter - artistCenter) < 1.0);
+        QVERIFY(more->x() > artist->x());
+        QCOMPARE(more->property("opacity").toReal(), 1.0);
+
+        // Initially distraction-free is off, controls are fully visible
+        QCOMPARE(player->property("distractionFree").toBool(), false);
+        QCOMPARE(player->property("controlsHidden").toBool(), false);
+        QCOMPARE(player->property("controlsOpacity").toReal(), 1.0);
+        QCOMPARE(transport->property("opacity").toReal(), 1.0);
+        QCOMPARE(dfButton->property("symbol").toString(), QStringLiteral("fullscreen"));
+        const qreal yBeforeInactivity = nowPlaying->y();
+
+        // Click fullscreen / distraction-free button
+        QVERIFY(QMetaObject::invokeMethod(dfButton, "clicked"));
+        Rig::settle();
+        QCOMPARE(player->property("distractionFree").toBool(), true);
+        QCOMPARE(dfButton->property("symbol").toString(), QStringLiteral("fullscreen_exit"));
+
+        // Trigger inactivity timer (simulating 5 seconds of no mouse movement)
+        auto *tracker = player->findChild<QObject *>(QStringLiteral("activityTracker"));
+        auto *cursorOverlay = player->findChild<QQuickItem *>(QStringLiteral("blankCursorOverlay"));
+        auto *hideAnim = player->findChild<QObject *>(QStringLiteral("hideControlsAnimation"));
+        auto *showAnim = player->findChild<QObject *>(QStringLiteral("showControlsAnimation"));
+        QVERIFY(hideAnim && showAnim);
+        QVERIFY(tracker && cursorOverlay);
+        QCOMPARE(tracker->property("cursorShape").toInt(), static_cast<int>(Qt::ArrowCursor));
+        QVERIFY(!cursorOverlay->isVisible());
+        tracker->setProperty("enabled", false);
+        QVERIFY(QMetaObject::invokeMethod(timer, "triggered"));
+        Rig::settle();
+        QCOMPARE(player->property("controlsHidden").toBool(), true);
+        for (int frame = 0; frame < 120 && hideAnim->property("running").toBool(); ++frame) {
+            QTest::qWait(16);
+            rig.render();
+        }
+        QCOMPARE(player->property("controlsOpacity").toReal(), 0.0);
+        QCOMPARE(transport->property("opacity").toReal(), 0.0);
+        QCOMPARE(more->property("opacity").toReal(), 0.0);
+        // Cursor is hidden in focus mode
+        QCOMPARE(tracker->property("cursorShape").toInt(), static_cast<int>(Qt::BlankCursor));
+        QVERIFY(cursorOverlay->isVisible());
+        // Whole group smoothly moves down into center
+        QVERIFY(nowPlaying->y() > yBeforeInactivity);
+        // Artwork and seek bar remain visible
+        QVERIFY(artwork->isVisible());
+        QVERIFY(seek->isVisible());
+
+        // Mouse movement / activity wakes controls smoothly, restores cursor, and moves group back up
+        tracker->setProperty("enabled", true);
+        QVERIFY(QMetaObject::invokeMethod(player.get(), "registerActivity"));
+        Rig::settle();
+        QCOMPARE(player->property("controlsHidden").toBool(), false);
+        for (int frame = 0; frame < 120 && showAnim->property("running").toBool(); ++frame) {
+            QTest::qWait(16);
+            rig.render();
+        }
+        QCOMPARE(player->property("controlsOpacity").toReal(), 1.0);
+        QCOMPARE(transport->property("opacity").toReal(), 1.0);
+        QCOMPARE(more->property("opacity").toReal(), 1.0);
+        QCOMPARE(tracker->property("cursorShape").toInt(), static_cast<int>(Qt::ArrowCursor));
+        QVERIFY(!cursorOverlay->isVisible());
+        QCOMPARE(nowPlaying->y(), yBeforeInactivity);
+
+        // Escape key exits distraction-free mode
+        QKeyEvent escEvent(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+        QCoreApplication::sendEvent(player.get(), &escEvent);
+        Rig::settle();
+        QCOMPARE(player->property("distractionFree").toBool(), false);
+        QCOMPARE(dfButton->property("symbol").toString(), QStringLiteral("fullscreen"));
+
+        // Queue panel is preserved during distraction-free mode
+        QMetaObject::invokeMethod(player.get(), "swapPanel", QStringLiteral("queue"), true);
+        Rig::settle();
+        QVERIFY(QMetaObject::invokeMethod(dfButton, "clicked"));
+        Rig::settle();
+        QCOMPARE(player->property("distractionFree").toBool(), true);
+        if (tracker) tracker->setProperty("enabled", false);
+        QVERIFY(QMetaObject::invokeMethod(timer, "triggered"));
+        Rig::settle();
+        for (int frame = 0; frame < 120 && hideAnim->property("running").toBool(); ++frame) {
+            QTest::qWait(16);
+            rig.render();
+        }
+        QCOMPARE(player->property("controlsOpacity").toReal(), 0.0);
+        QCOMPARE(player->property("panelRetainedInDistractionFree").toBool(), true);
+        QCOMPARE(player->property("panelDistractionFreeOpacity").toReal(), 1.0);
+
+        // Sound/equalizer panel fades out in distraction-free mode
+        QMetaObject::invokeMethod(player.get(), "swapPanel", QStringLiteral("audio"), true);
+        for (int frame = 0; frame < 60 && player->property("shownPanel").toString() != QStringLiteral("audio"); ++frame) {
+            QTest::qWait(16);
+            rig.render();
+        }
+        QCOMPARE(player->property("shownPanel").toString(), QStringLiteral("audio"));
+        QCOMPARE(player->property("panelRetainedInDistractionFree").toBool(), false);
+        QCOMPARE(player->property("panelDistractionFreeOpacity").toReal(), 0.0);
+        QCOMPARE(player->property("effectiveUsesPanelLayout").toBool(), false);
+        QCOMPARE(player->property("sideBySide").toBool(), false);
+
+        // Clicking distraction-free button exits mode
+        QVERIFY(QMetaObject::invokeMethod(dfButton, "clicked"));
+        Rig::settle();
+        QCOMPARE(player->property("distractionFree").toBool(), false);
+        QCOMPARE(player->property("controlsOpacity").toReal(), 1.0);
+        QCOMPARE(player->property("panelDistractionFreeOpacity").toReal(), 1.0);
+        QCOMPARE(player->property("effectiveUsesPanelLayout").toBool(), true);
+        QCOMPARE(player->property("sideBySide").toBool(), true);
     }
 
     /// lyrics scrolled up past the panel are faded out of sight, and the
@@ -2354,12 +2521,13 @@ private slots:
             QSKIP("counting frames needs the offscreen gpu rig");
         }
         rig.playSomething();
+        // counted from before the meter, which still draws as it goes away
+        int drawn = 0;
         const auto meter = rig.show(QStringLiteral("CompactMeter"));
         QVERIFY(meter);
         meter->setProperty("active", true);
         const QList<float> steady(48, 0.5f);
         rig.spectrum.publish(steady.constData(), 48);
-        int drawn = 0;
         QObject::connect(rig.control.get(), &QQuickRenderControl::sceneChanged, meter.get(), [&] { ++drawn; });
         const auto frames = [&](int count) {
             drawn = 0;
@@ -2577,7 +2745,7 @@ private slots:
     void viewsHoldStillAtRest_data()
     {
         QTest::addColumn<QString>("type");
-        for (const char *type : {"HomeView", "SearchView", "PlaylistsView", "SavedSongsView", "LocalFilesView", "LocalTracksView", "Sidebar",
+        for (const char *type : {"HomeView", "SearchView", "PlaylistsView", "SavedSongsView", "LocalFilesView", "LocalTracksView", "StatsView", "Sidebar",
                                  "PlayerBar", "SettingsPages", "EmptyState", "Stickers", "ShapeIcon"}) {
             QTest::addRow("%s", type) << QString::fromLatin1(type);
         }
@@ -3262,7 +3430,7 @@ private slots:
         QTest::addColumn<QString>("type");
         for (const char *type : {"SoundPanel", "SleepTimerPanel", "ImmersiveQueue", "ImmersiveLyrics", "SegmentedControl",
                                  "StyledSwitch", "RollingText", "PlayerBar", "LyricsPanel", "QueuePanel", "Sidebar",
-                                 "PageHost", "HomeView", "SearchView", "ArtistView", "AlbumView", "PlaylistView", "PlaylistsView", "SavedSongsView", "LocalFilesView", "LocalTracksView", "StartupView",
+                                 "PageHost", "HomeView", "SearchView", "ArtistView", "AlbumView", "PlaylistView", "PlaylistsView", "SavedSongsView", "LocalFilesView", "LocalTracksView", "StatsView", "StartupView",
                                  "SetupView", "CompactMeter", "MaterialShape", "ShapeIcon", "SquiggleRing", "WavyLine",
                                  "LoadingSpinner", "ShapeButton", "WavyPill", "ToolbarButton", "PlayButton", "ScrollingText"}) {
             QTest::newRow(type) << QString::fromLatin1(type);
@@ -3275,6 +3443,41 @@ private slots:
         Rig rig;
         rig.playSomething();
         QVERIFY(rig.show(type));
+    }
+
+    // the stats page with plays to show draws every part of itself: the
+    // figures, the top lists, the charts and the calendar
+    void theStatsPageDrawsLocalPlays()
+    {
+        Rig rig;
+        for (int index = 0; index < 12; ++index) {
+            Song song;
+            song.uri = QStringLiteral("spotify:track:stats%1").arg(index % 4);
+            song.name = QStringLiteral("Song %1").arg(index % 4);
+            song.artists = QStringLiteral("Artist %1").arg(index % 2);
+            song.albumName = QStringLiteral("Album");
+            song.albumId = QStringLiteral("album%1").arg(index % 2);
+            song.durationMs = 180'000;
+            Artist artist;
+            artist.id = QStringLiteral("artist%1").arg(index % 2);
+            artist.name = song.artists;
+            song.artistItems = {artist};
+            QVERIFY(rig.listeningHistory.record(song, QDateTime::currentDateTimeUtc().addDays(-index).addSecs(-3600 * index), 120'000));
+        }
+        QTRY_COMPARE(rig.stats.plays(), 12);
+        const auto view = rig.show(QStringLiteral("StatsView"));
+        QVERIFY(view);
+        QCOMPARE(rig.stats.topTracks()->count(), 4);
+        QCOMPARE(rig.stats.topArtists()->count(), 2);
+        QVERIFY(rig.stats.calendarTotal() >= 12);
+        // the latest play leads the recent ones, though it was kept first
+        QCOMPARE(rig.stats.recent()->nameAt(0), QStringLiteral("Song 0"));
+        rig.stats.setRankByTime(true);
+        rig.stats.setPeriod(0);
+        Rig::settle();
+        rig.stats.setPeriod(3);
+        Rig::settle();
+        QCOMPARE(rig.stats.plays(), 12);
     }
 };
 

@@ -75,6 +75,14 @@ Item {
                           || (root.isSelected(Library.Page.Playlist) && Library.selectedPlaylist.isLocal)
                 onClicked: Library.showLocalFiles()
             }
+            NavigationItem {
+                width: parent.width
+                text: qsTr("Stats")
+                iconShape: "softBurst"
+                symbol: "insights"
+                selected: root.isSelected(Library.Page.Stats)
+                onClicked: Library.showStats()
+            }
 
             SectionLabel {
                 width: parent.width

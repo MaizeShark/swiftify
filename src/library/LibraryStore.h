@@ -142,7 +142,7 @@ class LibraryStore : public QObject {
 public:
     /// LocalFiles is the grid of playlists made on this computer, opening on
     /// LocalTracks, every music file of the person's own as a list
-    enum class Page { Home, Search, Songs, Playlists, PinnedPlaylists, Playlist, Album, Artist, LocalFiles, LocalTracks };
+    enum class Page { Home, Search, Songs, Playlists, PinnedPlaylists, Playlist, Album, Artist, LocalFiles, LocalTracks, Stats };
     Q_ENUM(Page)
     enum class SortOrder { Playlist, Title, Artist, Album, Duration };
     Q_ENUM(SortOrder)
@@ -237,6 +237,8 @@ public:
     Q_INVOKABLE void showLocalFiles();
     /// every music file of the person's own, as a list
     Q_INVOKABLE void showLocalTracks();
+    /// what the person has been listening to (StatsStore)
+    Q_INVOKABLE void showStats();
     Q_INVOKABLE void selectPlaylist(const swiftify::Playlist &playlist);
     Q_INVOKABLE void selectPlaylistById(const QString &id);
     Q_INVOKABLE void selectAlbum(const swiftify::Album &album);

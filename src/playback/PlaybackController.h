@@ -146,6 +146,8 @@ public:
     Q_INVOKABLE void playFromModel(swiftify::SongListModel *model, int index, bool fromSearch = false);
     /// plays the list from a random song with shuffle on
     Q_INVOKABLE void shufflePlay(swiftify::SongListModel *model);
+    /// plays the list from its first song with shuffle off
+    Q_INVOKABLE void playInOrder(swiftify::SongListModel *model);
     Q_INVOKABLE void playSong(const swiftify::Song &song);
     /// debugging: plays a song whose load never finishes, so the loading
     /// animation of every visualizer can be watched for as long as wanted.
@@ -216,8 +218,8 @@ private:
     void beginPlayback(const Song &song, const QList<Song> &queue, bool fromSearch);
     void startPlayback(const Song &song, bool recordHistory = true, bool fromSearch = false,
                        quint32 crossfadeDurationMs = 0, quint32 initialPositionMs = 0);
-    QCoro::Task<> runStartPlayback(Song song, CancelToken token, bool fromSearch, quint32 crossfadeDurationMs,
-                                   quint32 initialPositionMs);
+    QCoro::Task<> runStartPlayback(Song song, CancelToken token, bool fromSearch, bool steppingBack,
+                                   quint32 crossfadeDurationMs, quint32 initialPositionMs);
     QCoro::Task<> runResume(CancelToken token);
     QCoro::Task<> restartAudioOutput(CancelToken token);
     QCoro::Task<> runLoadLyrics(Song song, CancelToken token);
@@ -234,7 +236,16 @@ private:
     void sleepTimerTick();
     void updatePlaybackWorkers();
     void rebuildShuffledQueue(const std::optional<Song> &startingWith);
+    /// the first playable song from row `index` of the queue in play order,
+    /// one way or the other, -1 starting from the top
+    std::optional<Song> playableFrom(int index, int direction, bool allowWrap) const;
     std::optional<Song> nextQueueSong(bool allowWrap) const;
+    /// plays the preceding song, false when there is none
+    bool stepBack();
+    /// `song` would not load because spotify will not play it here. it is
+    /// marked so, and the queue goes on the way it was going, or forwards
+    /// when nothing is left that way. false when nothing playable is left
+    bool skipUnavailable(const Song &song, bool steppingBack);
     void queueDidChange();
     void preloadNextTrack();
     void syncMediaSession();
@@ -278,6 +289,9 @@ private:
     /// what plays was started elsewhere: skips go to the core, and what
     /// follows is up to whoever started it, until a song is played here
     bool m_remote = false;
+    /// the next song started is a step back, so one that will not load is
+    /// passed over backwards too
+    bool m_steppingBack = false;
     bool m_audioOutputNeedsRestart = false;
     bool m_playing = false;
     bool m_loading = false;

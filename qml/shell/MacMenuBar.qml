@@ -15,6 +15,7 @@ Platform.MenuBar {
     signal minimizeRequested()
     signal zoomRequested()
     signal showWindowRequested()
+    signal catalogueSearchRequested()
 
     Platform.Menu {
         title: qsTr("File")
@@ -99,6 +100,13 @@ Platform.MenuBar {
             checked: Library.page === Library.Page.LocalFiles || Library.page === Library.Page.LocalTracks
             onTriggered: Library.showLocalFiles()
         }
+        Platform.MenuItem {
+            text: qsTr("Stats")
+            shortcut: "Ctrl+6"
+            checkable: true
+            checked: Library.page === Library.Page.Stats
+            onTriggered: Library.showStats()
+        }
         Platform.MenuSeparator {}
         Platform.MenuItem {
             text: qsTr("Back")
@@ -121,6 +129,11 @@ Platform.MenuBar {
             checkable: true
             checked: Player.showingQueue
             onTriggered: Player.toggleQueuePanel()
+        }
+        Platform.MenuItem {
+            text: qsTr("Search Catalogue")
+            shortcut: "Ctrl+K"
+            onTriggered: root.catalogueSearchRequested()
         }
         Platform.MenuSeparator {}
         Platform.MenuItem {

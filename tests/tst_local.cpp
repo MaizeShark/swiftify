@@ -514,7 +514,7 @@ private slots:
 
         QSignalSpy saved(&library, &LocalLibrary::tagsSaved);
         QSignalSpy scanned(&library, &LocalLibrary::scanned);
-        const QByteArray cover("\xff\xd8\xff\xe0 a cover", 14);
+        const QByteArray cover = QByteArrayLiteral("\xff\xd8\xff\xe0 a cover");
         library.editTags(uris[0],
                          {{QStringLiteral("title"), QStringLiteral("Avalon (Live)")},
                           {QStringLiteral("artist"), QStringLiteral("Roxy Music")},

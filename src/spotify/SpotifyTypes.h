@@ -71,6 +71,7 @@ struct Song {
     Q_PROPERTY(bool isExplicit MEMBER isExplicit FINAL)
     Q_PROPERTY(QString albumId MEMBER albumId FINAL)
     Q_PROPERTY(QString albumUri MEMBER albumUri FINAL)
+    Q_PROPERTY(bool isPlayable MEMBER isPlayable FINAL)
     Q_PROPERTY(bool valid READ isValid FINAL)
     /// a music file of the person's own (LocalLibrary), not a spotify track:
     /// nothing spotify knows can be done with it
@@ -91,6 +92,9 @@ public:
     QString albumId;
     QString albumUri;
     QList<Artist> artistItems;
+    /// false when spotify will not give this account the track. the queue
+    /// passes over it
+    bool isPlayable = true;
 
     bool isValid() const { return !uri.isEmpty(); }
     /// its uri is the file's own url, file:///...

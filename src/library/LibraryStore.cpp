@@ -61,7 +61,7 @@ bool sameSongs(const QList<Song> &left, const QList<Song> &right)
 {
     return std::equal(left.begin(), left.end(), right.begin(), right.end(), [](const Song &a, const Song &b) {
         return a.uri == b.uri && a.name == b.name && a.artists == b.artists && a.albumName == b.albumName
-            && a.artworkUrl == b.artworkUrl && a.durationMs == b.durationMs;
+            && a.artworkUrl == b.artworkUrl && a.durationMs == b.durationMs && a.isPlayable == b.isPlayable;
     });
 }
 
@@ -513,6 +513,7 @@ void LibraryStore::goBack()
     case Page::PinnedPlaylists: showPinnedPlaylists(); break;
     case Page::LocalFiles: showLocalFiles(); break;
     case Page::LocalTracks: showLocalTracks(); break;
+    case Page::Stats: showStats(); break;
     case Page::Playlist: {
         if (isLocalId(destination.playlistId)) {
             const Playlist local = m_localFiles ? m_localFiles->playlist(destination.playlistId) : Playlist {};
@@ -597,6 +598,12 @@ void LibraryStore::showLocalTracks()
 {
     cancelDetailLoads();
     navigate({Page::LocalTracks});
+}
+
+void LibraryStore::showStats()
+{
+    cancelDetailLoads();
+    navigate({Page::Stats});
 }
 
 void LibraryStore::selectPlaylistById(const QString &id)
