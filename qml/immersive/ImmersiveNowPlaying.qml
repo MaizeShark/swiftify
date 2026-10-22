@@ -386,6 +386,14 @@ Item {
                     tooltip: Player.repeatMode === Player.RepeatMode.One ? qsTr("Repeat song") : (Player.repeatMode === Player.RepeatMode.All ? qsTr("Repeat queue") : qsTr("Repeat off"))
                     onClicked: Player.cycleRepeatMode()
                 }
+                // while the DJ is playing, ask it for a fresh segment ("change it up")
+                Control {
+                    visible: Library.djActive
+                    effect: TransportButton.Bounce
+                    symbol: "refresh"
+                    tooltip: qsTr("Change it up (new DJ segment)")
+                    onClicked: Library.startDj()
+                }
             }
 
             // the speaker mutes; the slider is locked while the sleep timer fades
