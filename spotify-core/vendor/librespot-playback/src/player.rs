@@ -1830,6 +1830,13 @@ impl PlayerInternal {
             } => {
                 *start_playback = false;
             }
+            // swiftify patch: pausing a player that is already idle is a
+            // harmless no-op. swiftify defensively pauses the idle standby
+            // player (and the streaming player during local-file playback),
+            // so don't spam the log at error level for the expected states.
+            PlayerState::Stopped | PlayerState::EndOfTrack { .. } => {
+                debug!("Player::pause called while already idle ({:?})", self.state);
+            }
             _ => error!("Player::pause called from invalid state: {:?}", self.state),
         }
     }
