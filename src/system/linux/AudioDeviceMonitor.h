@@ -24,6 +24,8 @@
 
 #include <cstdint>
 
+class QTimer;
+
 struct pa_context;
 struct pa_server_info;
 struct pa_sink_info;
@@ -66,8 +68,14 @@ private:
     void serverInfo(const pa_server_info *info);
     void sinkInfo(const pa_sink_info *info, bool initial);
     void sinkRemoved(uint32_t index);
-    void notifyLost();
-    void notifyArrived();
+    void notifyLost(const QString &sinkName);
+    void notifyArrived(const QString &sinkName);
+
+    /// pipewire tears a sink down and builds it again under the same name
+    /// while it renegotiates its graph or sample rate, with the device never
+    /// moving. hold a "lost" this long so a sink that comes straight back does
+    /// not pause playback; a device genuinely gone does not reappear.
+    static constexpr int kLostDebounceMs = 1000;
 
     pa_threaded_mainloop *m_mainloop = nullptr;
     pa_context *m_context = nullptr;
@@ -77,6 +85,10 @@ private:
     /// pipewire can name a new default before it removes the old one
     QString m_previousDefaultSink;
     QDateTime m_defaultChangedAt;
+
+    // live on this object's (the gui) thread, driven only through queued calls
+    QTimer *m_lossTimer = nullptr;
+    QString m_pendingLostSink;
 };
 
 } // namespace swiftify

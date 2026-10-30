@@ -914,6 +914,7 @@ void PlaybackController::invalidateAudioOutput()
     if (!m_playing) {
         return;
     }
+    qCInfo(lcPlayer) << "audio output invalidated while playing; pausing";
     setPlaying(false);
     setStatus(QStringLiteral("Paused"));
     // the core is still convinced it is playing, and its own clock would keep
@@ -1266,6 +1267,7 @@ void PlaybackController::stopIfAudioOutputStalled()
     // the song on whatever is now the default, usually the speaker the person
     // just walked away from.
     if (m_playing && m_core->audioOutputStalled()) {
+        qCInfo(lcPlayer) << "core reports the audio output stalled (sink stopped consuming)";
         invalidateAudioOutput();
     }
 }

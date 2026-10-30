@@ -20,6 +20,7 @@
 
 #include <QLoggingCategory>
 #include <QMetaObject>
+#include <QTimer>
 
 #include <pulse/context.h>
 #include <pulse/introspect.h>
@@ -56,6 +57,14 @@ void release(pa_operation *operation)
 AudioDeviceMonitor::AudioDeviceMonitor(QObject *parent)
     : QObject(parent)
 {
+    m_lossTimer = new QTimer(this);
+    m_lossTimer->setSingleShot(true);
+    connect(m_lossTimer, &QTimer::timeout, this, [this] {
+        // nothing brought the sink back within the window, so it is really gone.
+        m_pendingLostSink.clear();
+        emit outputLost();
+    });
+
     m_mainloop = pa_threaded_mainloop_new();
     if (!m_mainloop) {
         return;
@@ -154,8 +163,10 @@ void AudioDeviceMonitor::serverInfo(const pa_server_info *info)
     m_defaultSink = defaultSink;
     m_defaultChangedAt = QDateTime::currentDateTimeUtc();
     // a new default that is a device just plugged in may follow up with play.
+    // no specific sink name: a default rename must not cancel a pending loss
+    // for the sink that was actually removed (e.g. headphones unplugged).
     if (hadDefault) {
-        notifyArrived();
+        notifyArrived(QString());
     }
 }
 
@@ -176,7 +187,9 @@ void AudioDeviceMonitor::sinkInfo(const pa_sink_info *info, bool initial)
         return;
     }
     if (isNew) {
-        notifyArrived();
+        // a sink appearing under a name we just lost is pipewire re-adding it
+        // after a reconfigure; notifyArrived cancels the pending pause.
+        notifyArrived(current.name);
         return;
     }
 
@@ -194,13 +207,13 @@ void AudioDeviceMonitor::sinkInfo(const pa_sink_info *info, bool initial)
         }
         if (!portLost) {
             // moved onto a port that just became available: headphones in
-            notifyArrived();
+            notifyArrived(current.name);
         }
     } else if (!previous.activePortAvailable && current.activePortAvailable) {
-        notifyArrived();
+        notifyArrived(current.name);
     }
     if (portLost && isDefault) {
-        notifyLost();
+        notifyLost(current.name);
     }
 }
 
@@ -216,18 +229,39 @@ void AudioDeviceMonitor::sinkRemoved(uint32_t index)
         || (name == m_previousDefaultSink && m_defaultChangedAt.isValid()
             && m_defaultChangedAt.msecsTo(QDateTime::currentDateTimeUtc()) < kDefaultHandoverMs);
     if (wasPlayingHere) {
-        notifyLost();
+        notifyLost(name);
     }
 }
 
-void AudioDeviceMonitor::notifyLost()
+void AudioDeviceMonitor::notifyLost(const QString &sinkName)
 {
-    QMetaObject::invokeMethod(this, &AudioDeviceMonitor::outputLost, Qt::QueuedConnection);
+    // defer the pause: pipewire often removes a sink and re-adds it under the
+    // same name within a moment while it reconfigures, nothing unplugged. the
+    // timer (on this object's thread) fires the loss only if it is not cancelled.
+    QMetaObject::invokeMethod(
+        this,
+        [this, sinkName] {
+            m_pendingLostSink = sinkName;
+            m_lossTimer->start(kLostDebounceMs);
+        },
+        Qt::QueuedConnection);
 }
 
-void AudioDeviceMonitor::notifyArrived()
+void AudioDeviceMonitor::notifyArrived(const QString &sinkName)
 {
-    QMetaObject::invokeMethod(this, &AudioDeviceMonitor::outputArrived, Qt::QueuedConnection);
+    QMetaObject::invokeMethod(
+        this,
+        [this, sinkName] {
+            // the exact sink we were about to call lost came back: it was a
+            // reconfigure, not a device leaving. drop the pending pause.
+            if (!sinkName.isEmpty() && sinkName == m_pendingLostSink && m_lossTimer->isActive()) {
+                m_lossTimer->stop();
+                m_pendingLostSink.clear();
+                qCInfo(lcDevices) << "output" << sinkName << "came back; not pausing";
+            }
+            emit outputArrived();
+        },
+        Qt::QueuedConnection);
 }
 
 } // namespace swiftify
