@@ -664,5 +664,13 @@
   "not a spotify artist: %1": "Этот адрес не является страницей исполнителя Spotify: %1",
   "the artist could not be read: %1": "Не удалось обработать сведения об исполнителе: %1",
   "a required string was missing": "Отсутствует обязательный параметр",
-  "a string was not valid utf-8": "Текст содержит некорректную последовательность UTF-8"
+  "a string was not valid utf-8": "Текст содержит некорректную последовательность UTF-8",
+  "Spotify DJ": "Spotify DJ",
+  "Let the DJ pick a mix for you": "Пусть DJ подберёт для вас микс",
+  "Change it up (new DJ segment)": "Сменить настроение (новый сегмент DJ)",
+  "Spotify Connect": "Spotify Connect",
+  "Show as a Spotify Connect device": "Показывать как устройство Spotify Connect",
+  "Device name": "Имя устройства",
+  "Off. Enable to report playback to Spotify so this shows as an active device — needed for Discord's native “Listening to Spotify” and for the DJ.": "Выключено. Включите, чтобы сообщать Spotify о воспроизведении и отображаться как активное устройство — это нужно для встроенного статуса Discord «Слушает Spotify» и для DJ.",
+  "On. Link your Spotify account to Discord for the native “Listening to Spotify” status. Requires Premium.": "Включено. Привяжите аккаунт Spotify к Discord для встроенного статуса «Слушает Spotify». Требуется Premium."
 }
