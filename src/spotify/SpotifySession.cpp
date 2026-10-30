@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include "spotify/SpotifySession.h"
 
 #include "app/ErrorCenter.h"
@@ -89,9 +107,18 @@ SpotifySession *SpotifySession::create(QQmlEngine *, QJSEngine *)
 
 void SpotifySession::reportError(const QString &message)
 {
+    m_reportedError = message;
     if (m_errors) {
         m_errors->show(message);
     }
+}
+
+void SpotifySession::clearReportedError()
+{
+    if (m_errors && !m_reportedError.isEmpty() && m_errors->message() == m_reportedError) {
+        m_errors->clear();
+    }
+    m_reportedError.clear();
 }
 
 void SpotifySession::setStatus(const QString &status)
@@ -247,7 +274,7 @@ QCoro::Task<> SpotifySession::restorePlaybackSession(StoredCredentials)
         throwIfStale(generation);
         setStatus(QStringLiteral("Connected"));
         setConnected(true);
-        m_errors->clear();
+        clearReportedError();
     } catch (const Cancelled &) {
         co_return;
     } catch (const SpotifyError &error) {
@@ -281,7 +308,7 @@ QCoro::Task<> SpotifySession::restoreLibrarySession(StoredCredentials credential
         throwIfStale(generation);
         setLibraryStatus(m_libraryNeedsUpgrade ? QStringLiteral("Reconnect for full access") : QStringLiteral("Connected"));
         setLibraryConnected(true, m_libraryNeedsUpgrade);
-        m_errors->clear();
+        clearReportedError();
         if (m_loadInitialLibrary) {
             co_await m_loadInitialLibrary();
         }
@@ -644,7 +671,7 @@ QCoro::Task<> SpotifySession::ensureFreshPlaybackConnection(bool force)
         co_await reconnectPlayback();
         setStatus(QStringLiteral("Connected"));
         setConnected(true);
-        m_errors->clear();
+        clearReportedError();
     }
     m_playbackConnectionIsSuspect = false;
 }

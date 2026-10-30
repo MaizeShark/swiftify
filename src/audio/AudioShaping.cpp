@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include "audio/AudioShaping.h"
 
 #include "app/Settings.h"
@@ -21,6 +39,7 @@ namespace {
 AudioShaping *s_instance = nullptr;
 
 const QString kGainsKey = QStringLiteral("audioEqualizerGains");
+const QString kPreampKey = QStringLiteral("audioEqualizerPreamp");
 const QString kEnabledKey = QStringLiteral("audioEqualizerEnabled");
 const QString kPresetsKey = QStringLiteral("audioEqualizerPresets");
 const QString kTempoKey = QStringLiteral("audioPlaybackTempo");
@@ -102,6 +121,7 @@ AudioShaping::AudioShaping(PlaybackCore *core, Settings *settings, SpotifySessio
             m_gains[band] = std::clamp(stored.at(band).toDouble(), -kMaximumGain, kMaximumGain);
         }
     }
+    m_preampGain = std::clamp(m_settings->value(kPreampKey, 0.0).toDouble(), -kMaximumGain, kMaximumGain);
     m_equalizerEnabled = m_settings->value(kEnabledKey, true).toBool();
     m_tempo = m_settings->value(kTempoKey, 1.0).toDouble();
     m_pitch = m_settings->value(kPitchKey, 0.0).toDouble();
@@ -189,7 +209,7 @@ bool AudioShaping::isFlat() const
 
 bool AudioShaping::isNeutral() const
 {
-    return isFlat() && std::abs(m_tempo - 1) < 0.001 && std::abs(m_pitch) < 0.001;
+    return isFlat() && std::abs(m_preampGain) < 0.01 && std::abs(m_tempo - 1) < 0.001 && std::abs(m_pitch) < 0.001;
 }
 
 void AudioShaping::setGains(const QList<double> &gains)
@@ -212,6 +232,19 @@ void AudioShaping::setGain(int band, double gain)
     QList<double> gains = m_gains;
     gains[band] = std::clamp(gain, -kMaximumGain, kMaximumGain);
     setGains(gains);
+}
+
+void AudioShaping::setPreampGain(double gain)
+{
+    gain = std::clamp(gain, -kMaximumGain, kMaximumGain);
+    if (!std::isfinite(gain) || std::abs(gain - m_preampGain) < 0.001) {
+        return;
+    }
+    m_preampGain = gain;
+    m_settings->setValue(kPreampKey, m_preampGain);
+    applyPreamp();
+    emit preampGainChanged();
+    emit neutralChanged();
 }
 
 void AudioShaping::setEqualizerEnabled(bool enabled)
@@ -317,6 +350,7 @@ void AudioShaping::storePresets()
 
 void AudioShaping::reset()
 {
+    setPreampGain(0.0);
     setGains(QList<double>(m_frequencies.size(), 0.0));
     setTempo(1);
     setPitch(0);
@@ -324,8 +358,17 @@ void AudioShaping::reset()
 
 void AudioShaping::apply()
 {
+    applyPreamp();
     applyEqualizer();
     applyShaping();
+}
+
+void AudioShaping::applyPreamp()
+{
+    try {
+        m_core->setPreampGain(float(m_preampGain));
+    } catch (const SpotifyError &) {
+    }
 }
 
 void AudioShaping::applyEqualizer()

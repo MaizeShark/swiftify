@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #pragma once
 
 #include "core/PlaybackCore.h"
@@ -46,9 +64,11 @@ public:
     void setVolume(float volume) override;
     float volume() const override;
     void setStreamQuality(int kbps) override;
+    void setVolumeNormalization(bool enabled) override;
     void setAudioCache(const QString &path, qint64 limitBytes) override;
     void setConnectReporting(bool enabled, const QString &deviceName) override;
     void setPlaybackShaping(float tempo, float pitchSemitones, bool preservesPitch) override;
+    void setPreampGain(float gainDb) override;
     void setEqualizer(const QList<float> &gainsDb) override;
 
     bool sessionIsValid() const override;
@@ -60,6 +80,7 @@ public:
     bool playLiveBuffer(SwiftifyLiveBuffer *buffer) override;
     void stopLiveBuffer() override;
     quint32 liveOutputRate() const override;
+    void analyseLive(const float *samples, qsizetype count, float outputGain) override;
 
     void setSpectrumEnabled(bool enabled) override;
     int spectrumLevels(float *out, int capacity) const override;
@@ -79,6 +100,7 @@ private:
     quint64 m_generation = 0;
     /// given again to each core opened (a reset makes a fresh one)
     int m_streamKbps = 0;
+    bool m_normalizeVolume = false;
     QString m_cachePath;
     qint64 m_cacheBytes = 0;
     bool m_connectReporting = false;

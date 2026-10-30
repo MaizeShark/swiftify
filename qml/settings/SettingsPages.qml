@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 pragma ComponentBehavior: Bound
 import QtQuick
 import Swiftify
@@ -254,6 +272,11 @@ Item {
                     ]
                     onActivated: (index) => Settings.songCacheMegabytes = root.cacheSizes[index]
                 }
+                ConfigSwitch {
+                    text: qsTr("Normalize volume")
+                    checked: Settings.normalizeVolume
+                    onToggledTo: (checked) => Settings.normalizeVolume = checked
+                }
                 NoteText {
                     text: qsTr("both cache and quality apply the next time playback connects")
                 }
@@ -362,7 +385,11 @@ Item {
                     segments: [
                         Segment { text: qsTr("System") },
                         Segment { text: "English" },
-                        Segment { text: "Русский" }
+                        Segment {
+                            text: "Русский"
+                            enabled: Settings.russianEnabled
+                            tooltip: Settings.russianEnabled ? "" : Settings.disabledLanguageMessage
+                        }
                     ]
                     onActivated: (index) => Settings.language = ["system", "en", "ru"][index]
                 }
@@ -827,7 +854,7 @@ Item {
                     }
                 }
                 NoteText {
-                    text: qsTr("stats.fm reads a public profile by its username, nothing else. the stats from this computer count songs heard for 30 seconds or more (%1 so far), kept only on this computer; their genres come from your Spotify library login.").arg(Stats.historyCount)
+                    text: qsTr("stats.fm only needs a public username. songs count here after 30 seconds (%1 so far) and are local only").arg(Stats.historyCount)
                 }
             }
         }
@@ -848,11 +875,29 @@ Item {
                     text: qsTr("Adds a seconds dial to the sleep timer, so a fade can be watched without waiting out a long ass timer")
                 }
 
+                ConfigSwitch {
+                    text: qsTr("Enable logging for next launch")
+                    checked: Settings.loggingEnabled
+                    onToggledTo: (checked) => Settings.loggingEnabled = checked
+                }
+                NoteText {
+                    text: Settings.loggingActive
+                        ? qsTr("Logging is active for this session. Logs are saved to %1").arg(Settings.logFilePath)
+                        : qsTr("Sets the OS logging variables and writes logs to %1 on the next launch").arg(Settings.logFilePath)
+                }
+
                 Flow {
                     x: 8
                     width: parent.width - 16
                     spacing: 8
                     topPadding: 4
+
+                    TextButton {
+                        variant: TextButton.Tonal
+                        symbol: "folder_open"
+                        text: qsTr("Open Logs Folder")
+                        onClicked: Settings.openLogsFolder()
+                    }
 
                     TextButton {
                         variant: TextButton.Tonal

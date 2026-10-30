@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include "FakeCore.h"
 #include "soloist/SoloistCore.h"
 
@@ -171,6 +189,24 @@ private slots:
         QVERIFY(m_dir->isValid());
         // stands in for the soloist binary: writes the port the fake listens
         // on where soloist would, and waits to be stopped
+#ifdef Q_OS_WIN
+        m_program = m_dir->filePath(QStringLiteral("soloist.cmd"));
+        QFile script(m_program);
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        script.write("@echo off\r\n"
+                     ":loop\r\n"
+                     "if \"%~1\"==\"\" goto done\r\n"
+                     "if \"%~1\"==\"--data-dir\" (\r\n"
+                     "  set \"d=%~2\"\r\n"
+                     "  shift\r\n"
+                     ")\r\n"
+                     "shift\r\n"
+                     "goto loop\r\n"
+                     ":done\r\n"
+                     "<nul set /p=\"%FAKE_SOLOIST_PORT%\" > \"%d%\\ws.port\"\r\n"
+                     "ping -n 600 127.0.0.1 >nul\r\n");
+        script.close();
+#else
         m_program = m_dir->filePath(QStringLiteral("soloist"));
         QFile script(m_program);
         QVERIFY(script.open(QIODevice::WriteOnly));
@@ -180,6 +216,7 @@ private slots:
                      "exec sleep 600\n");
         script.close();
         script.setPermissions(script.permissions() | QFile::ExeOwner);
+#endif
         m_soloist = std::make_unique<FakeSoloist>();
         qputenv("FAKE_SOLOIST_PORT", QByteArray::number(m_soloist->port()));
         // no sink in the real sound server for a test
@@ -203,7 +240,7 @@ private slots:
         const QStringList names = m_soloist->commandNames();
         const qsizetype play = names.indexOf(QStringLiteral("play"));
         QVERIFY(names.indexOf(QStringLiteral("activate")) >= 0 && names.indexOf(QStringLiteral("activate")) < play);
-        QCOMPARE(names.at(play - 1), QStringLiteral("set_volume"));
+        QVERIFY(names.indexOf(QStringLiteral("set_volume")) >= 0 && names.indexOf(QStringLiteral("set_volume")) < play);
         QCOMPARE(m_soloist->commands.at(play).value(QStringLiteral("uri")).toString(), QStringLiteral("spotify:track:a"));
         // swiftify's queue decides what follows, so soloist's repeat goes off
         const qsizetype repeat = m_soloist->commandNames().indexOf(QStringLiteral("set_repeat_track"));
@@ -214,6 +251,11 @@ private slots:
         QVERIFY(!m_core->takeEndOfTrack());
         // nothing reached librespot
         QVERIFY(m_fallback->pending.isEmpty());
+
+        // playing a new song does not reset soloist's volume
+        m_soloist->commands.clear();
+        QCoro::waitFor(m_core->playTrack(QStringLiteral("spotify:track:b")));
+        QVERIFY(!m_soloist->commandNames().contains(QStringLiteral("set_volume")));
     }
 
     void anUnpairedSoloistSaysHowToPair()
@@ -410,6 +452,60 @@ private slots:
         QCOMPARE(m_core->playbackDurationMs(), 1234u);
         m_core->pause();
         QVERIFY(m_fallback->log.contains(QStringLiteral("pause")));
+    }
+
+    void detectsSoloistAndApiKey()
+    {
+        qputenv("SWIFTIFY_SOLOIST", m_program.toUtf8());
+        qputenv("SOLOIST_API_KEY", "test-api-key");
+        qputenv("SWIFTIFY_PLAYBACK", "librespot");
+        QVERIFY(!SoloistCore::detect().has_value());
+
+        qunsetenv("SWIFTIFY_PLAYBACK");
+        const auto detected = SoloistCore::detect();
+        QVERIFY(detected.has_value());
+        QCOMPARE(detected->program, m_program);
+        QCOMPARE(detected->apiKey, QStringLiteral("test-api-key"));
+        qunsetenv("SWIFTIFY_SOLOIST");
+        qunsetenv("SOLOIST_API_KEY");
+    }
+
+    void settingVolumeSendsSetVolumeToSoloist()
+    {
+        QCoro::waitFor(m_core->playTrack(QStringLiteral("spotify:track:a")));
+        m_soloist->commands.clear();
+        m_core->setVolume(0.42f);
+        QTRY_VERIFY(m_soloist->commandNames().contains(QStringLiteral("set_volume")));
+        QCOMPARE(m_soloist->commands.last().value(QStringLiteral("volume")).toInt(), 42);
+
+        m_core->setVolume(0.85f);
+        QTRY_COMPARE(m_soloist->commands.last().value(QStringLiteral("volume")).toInt(), 85);
+    }
+
+    void remoteVolumeChangeUpdatesCoreVolume()
+    {
+        QCoro::waitFor(m_core->playTrack(QStringLiteral("spotify:track:a")));
+        QSignalSpy spy(m_core.get(), &PlaybackCore::remoteVolumeChanged);
+        m_soloist->send({{QStringLiteral("type"), QStringLiteral("volume_changed")},
+                         {QStringLiteral("volume"), 63}});
+        QTRY_COMPARE(spy.count(), 1);
+        QCOMPARE(m_core->volume(), 0.63f);
+    }
+
+    void spectrumLevelsForwardsToFallback()
+    {
+        m_fallback->musicLevels = true;
+        float levels[48]{};
+        const int count = m_core->spectrumLevels(levels, 48);
+        QCOMPARE(count, 48);
+        bool hasNonZero = false;
+        for (float level : levels) {
+            if (level > 0.0f) {
+                hasNonZero = true;
+                break;
+            }
+        }
+        QVERIFY(hasNonZero);
     }
 
 private:

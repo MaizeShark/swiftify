@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 //! a plain c abi over `SpotifyCore` for the linux qt front end. the header is
 //! `include/swiftify_core.h`.
 //!
@@ -587,6 +605,7 @@ fallible_call!(swiftify_core_pause() => |core| core.pause());
 fallible_call!(swiftify_core_seek(position_ms: u32) => |core| core.seek(position_ms));
 fallible_call!(swiftify_core_set_volume(volume: f32) => |core| core.set_volume(volume));
 fallible_call!(swiftify_core_set_stream_quality(kbps: u32) => |core| core.set_stream_quality(kbps));
+fallible_call!(swiftify_core_set_volume_normalization(enabled: bool) => |core| core.set_volume_normalization(enabled));
 /// keeps streamed songs in `path`, up to `limit_bytes`; an empty path keeps
 /// none. applies the next time playback connects. returns null on success, or
 /// an error message to free.
@@ -611,6 +630,7 @@ pub unsafe extern "C" fn swiftify_core_set_audio_cache(
 }
 fallible_call!(swiftify_core_set_playback_shaping(tempo: f32, pitch_semitones: f32, preserves_pitch: bool)
     => |core| core.set_playback_shaping(tempo, pitch_semitones, preserves_pitch));
+fallible_call!(swiftify_core_set_preamp_gain(gain_db: f32) => |core| core.set_preamp_gain(gain_db));
 
 /// turns native spotify-connect presence on or off: when on, swiftify registers
 /// as a connect device under `device_name`, reports what it plays (so discord's
@@ -916,6 +936,31 @@ pub unsafe extern "C" fn swiftify_core_play_live(
         return into_raw("the live buffer was missing".to_owned());
     };
     error_string(core.core.play_live(Arc::clone(&buffer.buffer), buffer.rate, buffer.channels))
+}
+
+/// hands `count` interleaved stereo samples, heard at `output_gain` of their
+/// full level, to the spectrum alone, for audio another program plays to the
+/// speakers itself. safe to call from any thread, such as the one recording.
+///
+/// # Safety
+/// `core` is null or live; `samples` points to `count` floats.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn swiftify_core_analyse_live(
+    core: *const SwiftifyCore,
+    samples: *const f32,
+    count: usize,
+    output_gain: f32,
+) {
+    // SAFETY: forwarded from the caller.
+    let Some(core) = (unsafe { handle(core) }) else {
+        return;
+    };
+    if samples.is_null() || count == 0 {
+        return;
+    }
+    // SAFETY: the caller guarantees `count` readable floats.
+    core.core
+        .analyse_live(unsafe { std::slice::from_raw_parts(samples, count) }, f64::from(output_gain));
 }
 
 /// # Safety

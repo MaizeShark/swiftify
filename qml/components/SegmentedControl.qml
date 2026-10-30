@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 pragma ComponentBehavior: Bound
 import QtQuick
 import Swiftify
@@ -96,6 +114,23 @@ Item {
                     ripple.release()
                 }
             }
+
+            MouseArea {
+                id: disabledHover
+                anchors.fill: parent
+                enabled: tint.segment !== null && !tint.segment.enabled && tint.segment.tooltip.length > 0
+                hoverEnabled: enabled
+                acceptedButtons: Qt.NoButton
+            }
+
+            Loader {
+                anchors.fill: parent
+                active: disabledHover.containsMouse && disabledHover.enabled
+                sourceComponent: StyledToolTip {
+                    visible: true
+                    text: tint.segment ? tint.segment.tooltip : ""
+                }
+            }
         }
     }
 
@@ -163,15 +198,18 @@ Item {
                 onClicked: root.activated(index)
 
                 contentItem: Item {
-                    implicitWidth: content.implicitWidth
+                    implicitWidth: content.naturalWidth
                     implicitHeight: content.implicitHeight
 
                     Row {
                         id: content
+                        readonly property real naturalWidth: label.implicitWidth + (symbol.visible ? symbol.implicitWidth + spacing : 0)
                         anchors.centerIn: parent
+                        width: Math.min(naturalWidth, parent.width)
                         spacing: 6
 
                         MaterialSymbol {
+                            id: symbol
                             anchors.verticalCenter: parent.verticalCenter
                             visible: segment.modelData.symbol.length > 0
                             text: segment.modelData.symbol
@@ -184,10 +222,16 @@ Item {
                             }
                         }
                         StyledText {
+                            id: label
+                            objectName: "segmentLabel"
                             anchors.verticalCenter: parent.verticalCenter
+                            width: Math.max(0, content.width - (symbol.visible ? symbol.width + content.spacing : 0))
                             visible: segment.modelData.text.length > 0
                             text: segment.modelData.text
                             font.pixelSize: Appearance.fontSize.smallie
+                            fontSizeMode: Text.Fit
+                            minimumPixelSize: Math.min(10, font.pixelSize)
+                            elide: Text.ElideRight
                             font.weight: Font.Medium
                             color: segment.foreground
 

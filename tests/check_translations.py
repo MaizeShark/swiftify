@@ -1,10 +1,33 @@
-"""Check catalog validity, placeholders, and coverage of literal qsTr calls."""
+# Swiftify, a spotify player for desktop
+# Copyright (C) 2026  shred0s
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""Check catalog validity, placeholders, and QML/C++ translation coverage."""
 import json
 import pathlib
 import re
 import sys
 
 root = pathlib.Path(sys.argv[1])
+translations_header = (root / "src/app/Translations.h").read_text(encoding="utf-8")
+
+
+def is_language_enabled(flag_name):
+    match = re.search(rf"\b{flag_name}\s*=\s*(true|false)\b", translations_header)
+    assert match is not None, f"Missing {flag_name} in src/app/Translations.h"
+    return match.group(1) == "true"
 
 
 def unique_object(pairs):
@@ -15,6 +38,10 @@ def unique_object(pairs):
         result[key] = value
     return result
 
+
+if not is_language_enabled("kRussianTranslationEnabled"):
+    print("Skipped Russian translations (disabled in src/app/Translations.h).")
+    raise SystemExit(0)
 
 catalog = json.loads((root / "translations/ru.json").read_text(encoding="utf-8"), object_pairs_hook=unique_object)
 for source, translated in catalog.items():
@@ -28,11 +55,16 @@ for source, translated in catalog.items():
         ), f"Placeholders differ: {source}"
 
 missing = []
-for path in (root / "qml").rglob("*.qml"):
-    for match in re.finditer(r'qsTr\(("(?:[^"\\]|\\.)*")', path.read_text(encoding="utf-8")):
-        source = json.loads(match.group(1))
-        if source not in catalog:
-            missing.append(f"{path.relative_to(root)}: {source}")
+literal = r'"(?:[^"\\]|\\.)*"'
+for path in list((root / "qml").rglob("*.qml")) + list((root / "src").rglob("*.cpp")):
+    text = path.read_text(encoding="utf-8")
+    patterns = [rf'\b(?:qsTr|tr)\(\s*({literal})',
+                rf'\b(?:qsTranslate|QCoreApplication::translate)\(\s*{literal}\s*,\s*({literal})']
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            source = json.loads(match.group(1))
+            if source not in catalog:
+                missing.append(f"{path.relative_to(root)}: {source}")
 if missing:
     raise SystemExit("Missing Russian translations:\n" + "\n".join(missing))
-print(f"Validated {len(catalog)} Russian translations and QML coverage.")
+print(f"Validated {len(catalog)} Russian translations and QML/C++ coverage.")

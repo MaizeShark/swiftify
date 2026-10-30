@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include "core/RustCore.h"
 
 #include "spotify/SpotifyError.h"
@@ -89,6 +107,9 @@ void RustCore::open()
     // taken once already, so a refusal now has nothing new to say
     if (m_streamKbps > 0) {
         swiftify_string_free(swiftify_core_set_stream_quality(m_core, uint32_t(m_streamKbps)));
+    }
+    if (m_normalizeVolume) {
+        swiftify_string_free(swiftify_core_set_volume_normalization(m_core, true));
     }
     if (!m_cachePath.isEmpty()) {
         swiftify_string_free(swiftify_core_set_audio_cache(m_core, m_cachePath.toUtf8().constData(),
@@ -254,6 +275,12 @@ void RustCore::setStreamQuality(int kbps)
     throwIfError(swiftify_core_set_stream_quality(m_core, uint32_t(kbps)));
 }
 
+void RustCore::setVolumeNormalization(bool enabled)
+{
+    m_normalizeVolume = enabled;
+    throwIfError(swiftify_core_set_volume_normalization(m_core, enabled));
+}
+
 void RustCore::setAudioCache(const QString &path, qint64 limitBytes)
 {
     m_cachePath = path;
@@ -273,6 +300,11 @@ void RustCore::setConnectReporting(bool enabled, const QString &deviceName)
 void RustCore::setPlaybackShaping(float tempo, float pitchSemitones, bool preservesPitch)
 {
     throwIfError(swiftify_core_set_playback_shaping(m_core, tempo, pitchSemitones, preservesPitch));
+}
+
+void RustCore::setPreampGain(float gainDb)
+{
+    throwIfError(swiftify_core_set_preamp_gain(m_core, gainDb));
 }
 
 void RustCore::setEqualizer(const QList<float> &gainsDb)
@@ -303,6 +335,11 @@ quint32 RustCore::liveOutputRate() const
 void RustCore::stopLiveBuffer()
 {
     swiftify_core_stop_live(m_core);
+}
+
+void RustCore::analyseLive(const float *samples, qsizetype count, float outputGain)
+{
+    swiftify_core_analyse_live(m_core, samples, size_t(std::max<qsizetype>(count, 0)), outputGain);
 }
 
 void RustCore::setSpectrumEnabled(bool enabled)

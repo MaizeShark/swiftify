@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 pragma ComponentBehavior: Bound
 import QtQuick
 import Swiftify
@@ -147,20 +165,20 @@ Item {
                 Stepper {
                     value: root.hours
                     maximum: 12
-                    unit: "h"
+                    unit: qsTr("h")
                     onStepped: (value) => root.hours = value
                 }
                 Stepper {
                     value: root.minutes
                     maximum: 59
-                    unit: "min"
+                    unit: qsTr("min")
                     onStepped: (value) => root.minutes = value
                 }
                 Stepper {
                     visible: Settings.debuggingEnabled
                     value: root.seconds
                     maximum: 59
-                    unit: "s"
+                    unit: qsTr("s")
                     onStepped: (value) => root.seconds = value
                 }
             }
@@ -218,6 +236,7 @@ Item {
 
         SegmentedControl {
             id: fadePicker
+            objectName: "sleepTimerFadePicker"
             width: parent.width
             segmentWidth: (width - 2 * inset) / 3
             scheme: root.scheme

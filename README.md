@@ -24,6 +24,14 @@ first image shows equalizer, tempo and pitch settings. second picture shows how 
   </tr>
 </table>
 
+## download
+
+you can download swiftify for your operating system at [https://shredos.dev](https://shredos.dev/#download)
+
+<br/>
+
+## Contents
+
 - [Before you start](#before-you-start)
 - [Prebuilt builds](#prebuilt-builds)
 - [Building from source](#building-from-source)
@@ -33,6 +41,7 @@ first image shows equalizer, tempo and pitch settings. second picture shows how 
   - [Windows](#windows)
 - [Stats](#stats)
 - [Command line](#command-line)
+- [License](#license)
 
 ## Before you start
 
@@ -45,25 +54,25 @@ first image shows equalizer, tempo and pitch settings. second picture shows how 
 
 ## Tutorials
 
-### "spotify could not load this track" (soloist)
+### "spotify will not play this track" (soloist)
 
 spotify refuses librespot the keys to decrypt songs on newer accounts (librespot's
-logs say `error audio key 0 1`), so every song fails. on linux swiftify can play
+logs say `error audio key 0 1`), so every song fails. swiftify can play
 spotify's songs through [spotify soloist](https://developer.spotify.com/documentation/soloist)
 instead, spotify's own connect client, which isnt affected.
 
 1. install soloist from its [getting started guide](https://developer.spotify.com/documentation/soloist/tutorials/getting-started)
-   (`~/.local/bin/soloist` is fine)
+   (`~/.local/bin/soloist`, `/opt/homebrew/bin/soloist`, on your `PATH`, or beside `swiftify.exe` on windows)
 2. make a soloist api key in the [developer dashboard](https://developer.spotify.com/dashboard/soloist)
-   and put it in `~/.config/soloist/api-key` (or `SOLOIST_API_KEY`)
+   and put it in `~/.config/soloist/api-key` (or `%LOCALAPPDATA%\soloist\api-key` on windows, or `SOLOIST_API_KEY`)
 3. start swiftify. it starts soloist itself, as a connect device called "Swiftify".
    the first time, pick "Swiftify" once in the devices list of the spotify desktop app on
    the same computer (or the phone app), so soloist is signed in
 4. press play in swiftify
 
-with soloist, swiftify makes a sink called "Swiftify (Soloist)" for soloist to play into,
+on linux with pipewire, swiftify makes a sink called "Swiftify (Soloist)" for soloist to play into,
 and plays that on through its own output, so the equalizer and the visualizers still work.
-this needs pipewire, under pulseaudio alone soloist plays straight to the speakers.
+under pulseaudio alone, or on macos and windows, soloist plays straight to the speakers.
 `SWIFTIFY_SOLOIST_ROUTE=off` does that on purpose. tempo and pitch only work on your own
 music files, and crossfade waits for each song to end. soloist builds expire after 90 days,
 download a new one when it says so.
@@ -101,7 +110,7 @@ and a macos dmg for apple silicon.
 
 ### Build requirements
 
-- Qt 6.10 or newer: Qt Base, Qt Declarative and Qt Shader Tools, and on linux Qt WebSockets (for soloist)
+- Qt 6.10 or newer: Qt Base, Qt Declarative, Qt Shader Tools and Qt WebSockets
 - QtKeychain and QCoro 0.10 or newer, both built for Qt 6
 - CMake 3.24 or newer, Ninja, and a C++20 compiler
 - Rust (stable, from [rustup](https://rustup.rs))
@@ -118,7 +127,7 @@ build, drop that and run `ctest --test-dir build` if u want them.
 u need [homebrew](https://brew.sh) and apple's command line tools (`xcode-select --install`, or full xcode). then:
 
 ```sh
-brew install qtbase qtdeclarative qtshadertools qtkeychain qcoro6 cmake ninja
+brew install qtbase qtdeclarative qtshadertools qtwebsockets qtkeychain qcoro6 cmake ninja
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
 
@@ -196,7 +205,7 @@ the tray. `-DSWIFTIFY_DESKTOP_INTEGRATION=OFF` turns those off.
 
 **because most Windows users cant even use their own OS, i made a script that handles building so it's as simple as possible :)**
 
-first install Qt 6.10+ with *Qt Shader Tools*, CMake and Ninja from the Qt online installer,
+first install Qt 6.10+ with *Qt Shader Tools* and *Qt WebSockets*, CMake and Ninja from the Qt online installer,
 Rust from [rustup](https://rustup.rs), and Git. choose either Qt for *MSVC 2022 64-bit*
 with Visual Studio 2022 17.1+ (or Build Tools) and its *Desktop development with C++*
 workload, or Qt for *MinGW 64-bit* with its matching MinGW toolchain.
@@ -284,3 +293,7 @@ on hyprland for example:
 bind = SUPER SHIFT, M, exec, swiftify --immersive
 bind = , XF86AudioPlay, exec, swiftify --play-pause
 ```
+
+## License
+
+swiftify is licensed under the gnu gpl v3 or later, see [LICENSE](LICENSE)

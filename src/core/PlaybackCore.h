@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #pragma once
 
 #include <QList>
@@ -60,6 +78,7 @@ public:
     virtual void setVolume(float volume) = 0;
     virtual float volume() const = 0;
     virtual void setStreamQuality(int kbps) = 0;
+    virtual void setVolumeNormalization(bool enabled) = 0;
     /// keeps streamed songs in `path`, up to `limitBytes`; both apply the
     /// next time playback connects
     virtual void setAudioCache(const QString &path, qint64 limitBytes) = 0;
@@ -68,6 +87,7 @@ public:
     /// default for cores that do not support it.
     virtual void setConnectReporting(bool /*enabled*/, const QString & /*deviceName*/) {}
     virtual void setPlaybackShaping(float tempo, float pitchSemitones, bool preservesPitch) = 0;
+    virtual void setPreampGain(float gainDb) = 0;
     virtual void setEqualizer(const QList<float> &gainsDb) = 0;
 
     virtual bool sessionIsValid() const = 0;
@@ -83,6 +103,10 @@ public:
     virtual void stopLiveBuffer() {}
     /// the rate live audio plays at without being resampled; 0 if unknown
     virtual quint32 liveOutputRate() const { return 0; }
+    /// hands the analyser interleaved stereo audio that something else plays
+    /// to the speakers, heard at `outputGain` of its full level; nothing of
+    /// it is played. may be called from any thread
+    virtual void analyseLive(const float * /*samples*/, qsizetype /*count*/, float /*outputGain*/) {}
 
     /// skips within what something else started on this core (a song picked
     /// in spotify on a phone, playing through a connect device), which goes
@@ -101,6 +125,8 @@ signals:
     void remoteTrackStarted(const swiftify::Song &song);
     /// playback here was paused or resumed from elsewhere
     void remotePlayingChanged(bool playing);
+    /// volume was changed from elsewhere (e.g. Spotify Connect or system mixer)
+    void remoteVolumeChanged(float volume);
 };
 
 } // namespace swiftify

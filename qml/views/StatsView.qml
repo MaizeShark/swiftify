@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
@@ -22,7 +40,7 @@ Flickable {
     readonly property list<string> weekdayNames: {
         const names = []
         for (let day = 1; day <= 7; ++day) {
-            names.push(Qt.locale().dayName(day % 7, Locale.ShortFormat))
+            names.push(Format.locale.dayName(day % 7, Locale.ShortFormat))
         }
         return names
     }
@@ -42,7 +60,9 @@ Flickable {
         return top + height > root.contentY - slack && top < root.contentY + root.height + slack
     }
     function hourName(hour: int): string {
-        return new Date(2000, 0, 1, hour).toLocaleTimeString(Qt.locale(), "h AP").replace(":00", "")
+        const russian = Format.locale.name.startsWith("ru")
+        const time = new Date(2000, 0, 1, hour).toLocaleTimeString(Format.locale, russian ? "HH:mm" : "h AP")
+        return russian ? time : time.replace(":00", "")
     }
     /// "1,284 plays", "3 hr 5 min" when ranking by time, or "" when the
     /// source left both out
@@ -57,7 +77,7 @@ Flickable {
     }
     /// "1,284"
     function figure(value: real): string {
-        return Math.round(value).toLocaleString(Qt.locale(), "f", 0)
+        return Math.round(value).toLocaleString(Format.locale, "f", 0)
     }
     /// listening time as the overview says it: hours past a few, else minutes
     function listeningTime(milliseconds: real): string {
@@ -246,7 +266,7 @@ Flickable {
             StyledText {
                 width: parent.width
                 visible: Stats.errorMessage.length > 0
-                text: Stats.errorMessage
+                text: qsTranslate("Stats", Stats.errorMessage)
                 wrapMode: Text.Wrap
                 color: Appearance.colors.error
             }
@@ -577,7 +597,7 @@ Flickable {
                             best = day
                         }
                     }
-                    return best >= 0 ? qsTr("Busiest day: %1").arg(Qt.locale().dayName((best + 1) % 7, Locale.LongFormat)) : ""
+                    return best >= 0 ? qsTr("Busiest day: %1").arg(Format.locale.dayName((best + 1) % 7, Locale.LongFormat)) : ""
                 }
 
                 BarChart {

@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include "spotify/WebApi.h"
 
 #include "spotify/SpotifyError.h"
@@ -312,6 +330,41 @@ QCoro::Task<Song> WebApi::song(QString trackId, QString accessToken)
         throw SpotifyError::invalidData(QStringLiteral("Spotify returned an unsupported track."));
     }
     co_return *song;
+}
+
+QCoro::Task<Album> WebApi::album(QString albumId, QString accessToken)
+{
+    const QJsonDocument document = co_await requestJson(apiUrl(QStringLiteral("/v1/albums/%1").arg(albumId), QUrlQuery {kMarket}), "GET", accessToken);
+    const auto album = json::album(document.object());
+    if (!album) {
+        throw SpotifyError::invalidData(QStringLiteral("Spotify returned an unsupported album."));
+    }
+    co_return *album;
+}
+
+QCoro::Task<Artist> WebApi::artist(QString artistId, QString accessToken)
+{
+    const QJsonDocument document = co_await requestJson(apiUrl(QStringLiteral("/v1/artists/%1").arg(artistId), QUrlQuery {kMarket}), "GET", accessToken);
+    const auto artist = json::artist(document.object());
+    if (!artist) {
+        throw SpotifyError::invalidData(QStringLiteral("Spotify returned an unsupported artist."));
+    }
+    co_return *artist;
+}
+
+QCoro::Task<Playlist> WebApi::playlist(QString playlistId, QString accessToken)
+{
+    // json::playlist needs both "items" and "tracks"
+    const QUrlQuery query {{QStringLiteral("fields"),
+                            QStringLiteral("id,name,description,images,uri,public,collaborative,"
+                                           "owner(id,display_name),items(total),tracks(total)")},
+                           kMarket};
+    const QJsonDocument document = co_await requestJson(apiUrl(QStringLiteral("/v1/playlists/%1").arg(playlistId), query), "GET", accessToken);
+    const Playlist playlist = json::playlist(document.object());
+    if (playlist.id.isEmpty()) {
+        throw SpotifyError::invalidData(QStringLiteral("Spotify returned an unsupported playlist."));
+    }
+    co_return playlist;
 }
 
 QCoro::Task<QList<Song>> WebApi::albumSongs(Album album, QString accessToken)

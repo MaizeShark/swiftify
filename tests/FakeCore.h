@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #pragma once
 
 #include "core/PlaybackCore.h"
@@ -56,6 +74,7 @@ public:
     quint32 position = 0;
     quint32 duration = 0;
     float volumeValue = 0.75f;
+    float preamp = 0.0f;
     bool spectrumEnabled = false;
     /// levels that move as music's would, for measuring what moving bars
     /// cost; still by default
@@ -140,8 +159,10 @@ public:
     void setVolume(float volume) override { volumeValue = volume; }
     float volume() const override { return volumeValue; }
     void setStreamQuality(int) override {}
+    void setVolumeNormalization(bool) override {}
     void setAudioCache(const QString &, qint64) override {}
     void setPlaybackShaping(float, float, bool) override {}
+    void setPreampGain(float gain) override { preamp = gain; }
     void setEqualizer(const QList<float> &) override {}
 
     bool sessionIsValid() const override { return sessionValid; }

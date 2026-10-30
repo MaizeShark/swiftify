@@ -1,6 +1,25 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include "app/AppController.h"
 #include "app/ErrorCenter.h"
 #include "app/Fonts.h"
+#include "app/Logging.h"
 #include "app/Paths.h"
 #include "app/Settings.h"
 #include "system/DiscordPresence.h"
@@ -225,14 +244,15 @@ void setupAudioEnvironment()
 
 int main(int argc, char *argv[])
 {
+#ifdef Q_OS_MACOS
+    startCompact(argv);
+#endif
+    logging::setupLogging();
 #ifdef Q_OS_WIN
     WindowsIntegration::initializeProcess();
 #endif
 #ifdef Q_OS_LINUX
     setupAudioEnvironment();
-#endif
-#ifdef Q_OS_MACOS
-    startCompact(argv);
 #endif
     tuneSceneGraph();
     QGuiApplication::setApplicationName(QStringLiteral("Swiftify"));
@@ -270,10 +290,10 @@ int main(int argc, char *argv[])
     fonts::loadIconFont();
     fonts::loadInterfaceFont();
 
+    ErrorCenter errors(nullptr);
     Settings settings(nullptr);
     Translations translations(&settings);
     Theme theme(&settings);
-    ErrorCenter errors(nullptr);
     QNetworkAccessManager network;
     RustCore rustCore;
 #ifdef SWIFTIFY_HAS_SOLOIST
@@ -291,11 +311,13 @@ int main(int argc, char *argv[])
     // what it streams is kept so a song played again needs no download
     const auto applyStreaming = [&] {
         core.setStreamQuality(settings.streamingQuality());
+        core.setVolumeNormalization(settings.normalizeVolume());
         core.setAudioCache(paths::cacheDirectory() + QStringLiteral("/songs"),
                            qint64(settings.songCacheMegabytes()) * 1000 * 1000);
     };
     applyStreaming();
     QObject::connect(&settings, &Settings::streamingQualityChanged, &core, applyStreaming);
+    QObject::connect(&settings, &Settings::normalizeVolumeChanged, &core, applyStreaming);
     QObject::connect(&settings, &Settings::songCacheMegabytesChanged, &core, applyStreaming);
     // native spotify-connect presence: registers a connect device so discord's
     // "listening to spotify" reflects playback (and advertises the DJ capability)

@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #pragma once
 
 #include "app/Paths.h"
@@ -5,6 +23,7 @@
 #include "library/CollectionModels.h"
 #include "library/SongListCache.h"
 #include "library/SongListModel.h"
+#include "spotify/SpotifyLink.h"
 #include "spotify/SpotifyTypes.h"
 
 #include <QHash>
@@ -347,6 +366,7 @@ private:
     void setDjActive(bool on);
     QCoro::Task<> runToggleSaved(Song song, bool shouldSave, quint64 generation);
     QCoro::Task<> runSongNavigation(Song song, bool toAlbum);
+    QCoro::Task<> runLinkNavigation(SpotifyLink link, CancelToken token);
     QCoro::Task<> runAdd(Song song, Playlist playlist);
     QCoro::Task<> runRemove(Song song, Playlist playlist);
     QCoro::Task<> runMove(Playlist playlist, int from, int count, int to, QList<Song> previous, QList<Song> reordered);

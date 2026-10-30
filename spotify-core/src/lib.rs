@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 use std::{
     io,
     path::PathBuf,
@@ -90,6 +108,7 @@ struct SpotifyState {
     mixer: Option<Arc<dyn Mixer>>,
     volume: f32,
     stream_bitrate: Bitrate,
+    volume_normalization: bool,
     /// where streamed songs are kept, and the most it may hold in bytes
     audio_cache: Option<(String, u64)>,
     local_playback: Option<file_playback::LocalPlayback>,
@@ -109,6 +128,7 @@ impl Default for SpotifyState {
             mixer: None,
             volume: 0.75,
             stream_bitrate: Bitrate::default(),
+            volume_normalization: false,
             audio_cache: None,
             local_playback: None,
             local_sink: None,
@@ -122,6 +142,7 @@ struct PlayerSlot {
     player: Arc<Player>,
     gain: Arc<AtomicU64>,
     active: Arc<AtomicBool>,
+    normalisation: bool,
 }
 
 impl PlayerSlot {
@@ -203,7 +224,7 @@ pub const SUPERSEDED: &str = "the request was replaced by a newer one";
 
 /// what a play request ends with when spotify will not give this account the
 /// track (SWIFTIFY_CORE_UNAVAILABLE in the c header). the front end skips it
-pub const UNAVAILABLE: &str = "Spotify could not load this track.";
+pub const UNAVAILABLE: &str = "Spotify will not play this track.";
 
 pub struct SpotifyCore {
     state: Mutex<SpotifyState>,
@@ -222,6 +243,7 @@ pub struct SpotifyCore {
     dsp: SharedDsp,
     timeline: Arc<Mutex<PlaybackTimeline>>,
     local_playback_active: Arc<AtomicBool>,
+    volume_normalization: Arc<AtomicBool>,
     /// shared with every sink this core builds, streaming and files alike.
     output_health: OutputHealth,
     /// the spotify track currently loaded in the streaming player, if any.
@@ -246,6 +268,8 @@ pub struct SpotifyCore {
     /// each DJ track's narration, keyed by uri, so loading a track can hand its
     /// lines to the player. accumulated as sets are resolved.
     dj_narration: Mutex<std::collections::HashMap<String, dj::Narration>>,
+    /// what `analyse_live` has gathered towards the spectrum's next run
+    live_analysis: Mutex<live_input::LiveAnalysis>,
 }
 
 impl Default for SpotifyCore {
@@ -254,10 +278,16 @@ impl Default for SpotifyCore {
     }
 }
 
+/// librespot and the core log through the log crate, which drops everything
+/// until a logger is set. this sets one that reads RUST_LOG (Logging.cpp fills
+/// it in when logging is on), unless the host set its own first
+fn start_logging() {
+    let _ = env_logger::Builder::from_default_env().try_init();
+}
+
 impl SpotifyCore {
     pub fn new() -> Self {
-        let _ = env_logger::try_init();
-
+        start_logging();
         Self {
             state: Mutex::new(SpotifyState::default()),
             playback_generation: watch::Sender::new(0),
@@ -266,6 +296,7 @@ impl SpotifyCore {
             dsp: SharedDsp::new(),
             timeline: Arc::new(Mutex::new(PlaybackTimeline::default())),
             local_playback_active: Arc::new(AtomicBool::new(false)),
+            volume_normalization: Arc::new(AtomicBool::new(false)),
             output_health: OutputHealth::new(),
             current_uri: Arc::new(Mutex::new(None)),
             connect_feed: watch::Sender::new(NowPlaying::default()),
@@ -275,6 +306,16 @@ impl SpotifyCore {
             connect_runtime: OnceLock::new(),
             dj_next_page: Mutex::new(None),
             dj_narration: Mutex::new(std::collections::HashMap::new()),
+            live_analysis: Mutex::new(live_input::LiveAnalysis::new()),
+        }
+    }
+
+    fn player_config(bitrate: Bitrate, normalisation: bool) -> PlayerConfig {
+        PlayerConfig {
+            position_update_interval: Some(Duration::from_secs(1)),
+            bitrate,
+            normalisation,
+            ..PlayerConfig::default()
         }
     }
 
@@ -292,6 +333,7 @@ impl SpotifyCore {
         initially_active: bool,
         initial_gain: f64,
     ) -> PlayerSlot {
+        let normalisation = config.normalisation;
         let gain = Arc::new(AtomicU64::new(initial_gain.clamp(0.0, 1.0).to_bits()));
         let active = Arc::new(AtomicBool::new(initially_active));
         let volume = PlayerVolume {
@@ -320,6 +362,7 @@ impl SpotifyCore {
             player,
             gain,
             active,
+            normalisation,
         }
     }
 
@@ -486,12 +529,11 @@ impl SpotifyCore {
             mixer::find(None).ok_or_else(|| "no librespot volume mixer is available".to_owned())?;
         let mixer = mixer_builder(MixerConfig::default())
             .map_err(|error| format!("failed to create volume mixer: {error}"))?;
-        let stream_bitrate = self.lock_state()?.stream_bitrate;
-        let player_config = PlayerConfig {
-            position_update_interval: Some(Duration::from_secs(1)),
-            bitrate: stream_bitrate,
-            ..PlayerConfig::default()
+        let (stream_bitrate, volume_normalization) = {
+            let state = self.lock_state()?;
+            (state.stream_bitrate, state.volume_normalization)
         };
+        let player_config = Self::player_config(stream_bitrate, volume_normalization);
         let player = self.make_player_slot(&session, &mixer, player_config.clone(), true, 1.0);
         let standby = self.make_player_slot(&session, &mixer, player_config, false, 0.0);
 
@@ -544,6 +586,15 @@ impl SpotifyCore {
         }
         self.spectrum.set_enabled(false);
         self.reset_timeline();
+    }
+
+    /// overall gain applied before the equalizer, in decibels. offsets the gain
+    /// of all audio and normalization.
+    pub fn set_preamp_gain(&self, preamp_db: f32) -> Result<(), String> {
+        let mut settings = self.dsp.get();
+        settings.preamp_db = preamp_db;
+        self.dsp.set(settings);
+        Ok(())
     }
 
     /// one gain per band, in decibels, in the order equalizer_frequencies
@@ -618,12 +669,13 @@ impl SpotifyCore {
         stop_cached_local_sink();
         self.lock_state()?.local_sink = None;
 
-        let (session, mixer, stream_bitrate) = {
+        let (session, mixer, stream_bitrate, volume_normalization) = {
             let state = self.lock_state()?;
             (
                 state.session.clone(),
                 state.mixer.clone(),
                 state.stream_bitrate,
+                state.volume_normalization,
             )
         };
         let (Some(session), Some(mixer)) = (session, mixer) else {
@@ -647,11 +699,7 @@ impl SpotifyCore {
             drop(previous);
         }
 
-        let player_config = PlayerConfig {
-            position_update_interval: Some(Duration::from_secs(1)),
-            bitrate: stream_bitrate,
-            ..PlayerConfig::default()
-        };
+        let player_config = Self::player_config(stream_bitrate, volume_normalization);
         let player = self.make_player_slot(&session, &mixer, player_config.clone(), true, 1.0);
         let standby = self.make_player_slot(&session, &mixer, player_config, false, 0.0);
         let mut state = self.lock_state()?;
@@ -692,7 +740,7 @@ impl SpotifyCore {
         if !self.is_latest_request(ticket) {
             return Err(SUPERSEDED.to_owned());
         }
-        let (active, standby) = self.player_slots()?;
+        let (active, standby) = self.ensure_player_slots()?;
         let player = Arc::clone(&active.player);
         let mut events = player.get_player_event_channel();
 
@@ -738,7 +786,6 @@ impl SpotifyCore {
             match event {
                 PlayerEvent::Playing { track_id, .. } if track_id == uri => return Ok(()),
                 PlayerEvent::Unavailable { track_id, .. } if track_id == uri => {
-                    // previous error was incredibly misleading, so i changed it to a generic error
                     return Err(UNAVAILABLE.to_owned());
                 }
                 PlayerEvent::Stopped { track_id, .. } if track_id == uri => {
@@ -753,12 +800,18 @@ impl SpotifyCore {
     /// player so the next track is ready for a normal start or a handoff.
     pub fn preload_track(&self, spotify_uri: String, preload_standby: bool) -> Result<(), String> {
         let uri = Self::parse_playable_uri(&spotify_uri)?;
+        let normalisation = self.volume_normalization();
         let (active, standby) = self.player_slots()?;
         // the preloaded decoder is built with the track's DJ lines, so set them
         // first, as librespot's spirc does before a preload.
-        self.apply_narration(&active.player, &spotify_uri, &uri);
-        active.player.preload(uri.clone());
-        if preload_standby && let Some(standby) = standby {
+        if active.normalisation == normalisation {
+            self.apply_narration(&active.player, &spotify_uri, &uri);
+            active.player.preload(uri.clone());
+        }
+        if preload_standby
+            && let Some(standby) = standby
+            && standby.normalisation == normalisation
+        {
             self.apply_narration(&standby.player, &spotify_uri, &uri);
             standby.player.preload(uri);
         }
@@ -781,13 +834,7 @@ impl SpotifyCore {
         if self.local_active()? {
             return Err("crossfade is unavailable for local-file playback".to_owned());
         }
-        let (outgoing, incoming) = {
-            let state = self.lock_state()?;
-            (
-                state.player.clone().ok_or_else(|| "Spotify player is not initialized".to_owned())?,
-                state.standby_player.clone().ok_or_else(|| "standby Spotify player is not initialized".to_owned())?,
-            )
-        };
+        let (outgoing, incoming) = self.ensure_crossfade_slots()?;
         let mut events = incoming.player.get_player_event_channel();
 
         {
@@ -848,7 +895,6 @@ impl SpotifyCore {
                 PlayerEvent::Unavailable { track_id, .. } if track_id == uri => {
                     incoming.set_gain(0.0);
                     incoming.player.stop();
-                    // previous error was incredibly misleading, so i changed it to a generic error
                     return Err(UNAVAILABLE.to_owned());
                 }
                 PlayerEvent::Stopped { track_id, .. } if track_id == uri => {
@@ -894,7 +940,7 @@ impl SpotifyCore {
 
         self.spectrum.clear();
         self.reset_timeline();
-        self.player()?.load(uri, true, 0);
+        self.ensure_player_slots()?.0.player.load(uri, true, 0);
         Ok(())
     }
 
@@ -1006,6 +1052,18 @@ impl SpotifyCore {
         let bitrate = Self::bitrate(kbps)?;
         self.lock_state()?.stream_bitrate = bitrate;
         Ok(())
+    }
+
+    /// levels loud and quiet songs to a common target: spotify's track gain
+    /// and limiter on streams, and replaygain tags on files of the person's own.
+    pub fn set_volume_normalization(&self, enabled: bool) -> Result<(), String> {
+        self.volume_normalization.store(enabled, Ordering::Relaxed);
+        self.lock_state()?.volume_normalization = enabled;
+        Ok(())
+    }
+
+    pub fn volume_normalization(&self) -> bool {
+        self.volume_normalization.load(Ordering::Relaxed)
     }
 
     /// keeps streamed songs in `path`, up to `limit_bytes`; an empty path
@@ -1168,12 +1226,15 @@ impl SpotifyCore {
         let cancel = Arc::new(AtomicBool::new(false));
         let source_frames = Arc::clone(&pushed_frames);
         let spectrum = self.spectrum.clone();
+        let replay_gain = local::replay_gain(&path);
         let source = file_playback::LocalTrackSource::new(
             decoder,
             spectrum,
             source_frames,
             Arc::clone(&cancel),
             self.dsp.clone(),
+            replay_gain,
+            Arc::clone(&self.volume_normalization),
         );
 
         let sink = self.resolve_live_sink()?;
@@ -1194,6 +1255,7 @@ impl SpotifyCore {
                 base_position_ms: 0,
                 channels,
                 sample_rate,
+                replay_gain,
                 cancel: Arc::clone(&cancel),
             });
         }
@@ -1300,6 +1362,14 @@ impl SpotifyCore {
         self.spectrum.set_enabled(enabled);
     }
 
+    /// hands the spectrum audio another program plays to the speakers by
+    /// itself: interleaved stereo, at `output_gain` of its full level. only
+    /// the visualizers see it; nothing of it is played
+    pub fn analyse_live(&self, samples: &[f32], output_gain: f64) {
+        let mut analysis = self.live_analysis.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        analysis.feed(&self.spectrum, samples, output_gain);
+    }
+
     /// the switch lock guards no data, so a panic while it was held leaves
     /// nothing inconsistent behind it
     fn lock_switching(&self) -> std::sync::MutexGuard<'_, ()> {
@@ -1339,6 +1409,105 @@ impl SpotifyCore {
 
         let active = state.player.clone().ok_or_else(|| "spotify player is not initialized".to_owned())?;
         Ok((active, state.standby_player.clone()))
+    }
+
+    /// returns the active and standby slots, rebuilding either whose
+    /// normalisation setting no longer matches `volume_normalization`.
+    fn ensure_player_slots(&self) -> Result<(PlayerSlot, Option<PlayerSlot>), String> {
+        let (session, mixer, bitrate, normalisation, needs_active, needs_standby) = {
+            let state = self.lock_state()?;
+            let session = state
+                .session
+                .clone()
+                .ok_or_else(|| "not connected to spotify".to_owned())?;
+            let active = state
+                .player
+                .clone()
+                .ok_or_else(|| "spotify player is not initialized".to_owned())?;
+            let standby = state.standby_player.clone();
+            let normalisation = state.volume_normalization;
+            let needs_active = active.normalisation != normalisation;
+            let needs_standby = standby
+                .as_ref()
+                .is_some_and(|slot| slot.normalisation != normalisation);
+            if !needs_active && !needs_standby {
+                return Ok((active, standby));
+            }
+            let mixer = state
+                .mixer
+                .clone()
+                .ok_or_else(|| "spotify player is not initialized".to_owned())?;
+            (
+                session,
+                mixer,
+                state.stream_bitrate,
+                normalisation,
+                needs_active,
+                needs_standby,
+            )
+        };
+        let config = Self::player_config(bitrate, normalisation);
+        let new_active =
+            needs_active.then(|| self.make_player_slot(&session, &mixer, config.clone(), true, 1.0));
+        let new_standby =
+            needs_standby.then(|| self.make_player_slot(&session, &mixer, config, false, 0.0));
+        let (old_active, old_standby, active, standby) = {
+            let mut state = self.lock_state()?;
+            let old_active = new_active.and_then(|slot| state.player.replace(slot));
+            let old_standby = new_standby.and_then(|slot| state.standby_player.replace(slot));
+            let active = state
+                .player
+                .clone()
+                .ok_or_else(|| "spotify player is not initialized".to_owned())?;
+            (old_active, old_standby, active, state.standby_player.clone())
+        };
+        if let Some(old) = old_active {
+            old.active.store(false, Ordering::Release);
+            old.player.stop();
+        }
+        if let Some(old) = old_standby {
+            old.active.store(false, Ordering::Release);
+            old.player.stop();
+        }
+        Ok((active, standby))
+    }
+
+    fn ensure_crossfade_slots(&self) -> Result<(PlayerSlot, PlayerSlot), String> {
+        let (session, mixer, bitrate, normalisation, outgoing) = {
+            let state = self.lock_state()?;
+            let outgoing = state
+                .player
+                .clone()
+                .ok_or_else(|| "Spotify player is not initialized".to_owned())?;
+            let incoming = state
+                .standby_player
+                .clone()
+                .ok_or_else(|| "standby Spotify player is not initialized".to_owned())?;
+            let normalisation = state.volume_normalization;
+            if incoming.normalisation == normalisation {
+                return Ok((outgoing, incoming));
+            }
+            let session = state
+                .session
+                .clone()
+                .ok_or_else(|| "not connected to spotify".to_owned())?;
+            let mixer = state
+                .mixer
+                .clone()
+                .ok_or_else(|| "Spotify player is not initialized".to_owned())?;
+            (session, mixer, state.stream_bitrate, normalisation, outgoing)
+        };
+        let config = Self::player_config(bitrate, normalisation);
+        let new_standby = self.make_player_slot(&session, &mixer, config, false, 0.0);
+        let old_standby = {
+            let mut state = self.lock_state()?;
+            state.standby_player.replace(new_standby.clone())
+        };
+        if let Some(old) = old_standby {
+            old.active.store(false, Ordering::Release);
+            old.player.stop();
+        }
+        Ok((outgoing, new_standby))
     }
 
     fn session(&self) -> Result<Session, String> {
@@ -1437,12 +1606,15 @@ impl SpotifyCore {
         let cancel = Arc::new(AtomicBool::new(false));
         let spectrum = self.spectrum.clone();
         let source_frames = Arc::clone(&pushed_frames);
+        let replay_gain = playback.replay_gain;
         let source = file_playback::LocalTrackSource::new(
             decoder,
             spectrum,
             source_frames,
             Arc::clone(&cancel),
             self.dsp.clone(),
+            replay_gain,
+            Arc::clone(&self.volume_normalization),
         );
 
         sink.append(source);
@@ -1460,6 +1632,7 @@ impl SpotifyCore {
             base_position_ms: target,
             channels,
             sample_rate,
+            replay_gain,
             cancel: Arc::clone(&cancel),
         });
         drop(state);
@@ -1734,6 +1907,18 @@ mod tests {
         assert!(core.set_volume(f32::NAN).is_err());
         assert!(core.set_volume(f32::INFINITY).is_err());
         assert_eq!(core.volume(), 1.0);
+    }
+
+    #[test]
+    fn volume_normalization_is_remembered_before_connecting_and_after_disconnect() {
+        let core = SpotifyCore::new();
+        assert!(!core.volume_normalization());
+        core.set_volume_normalization(true).unwrap();
+        assert!(core.volume_normalization());
+        core.disconnect();
+        assert!(core.volume_normalization());
+        core.set_volume_normalization(false).unwrap();
+        assert!(!core.volume_normalization());
     }
 
     #[test]

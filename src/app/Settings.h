@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #pragma once
 
 #include <QObject>
@@ -31,6 +49,7 @@ class Settings : public QObject {
     Q_PROPERTY(QString visualizerShape READ visualizerShape WRITE setVisualizerShape NOTIFY visualizerShapeChanged FINAL)
     Q_PROPERTY(double visualizerSensitivity READ visualizerSensitivity WRITE setVisualizerSensitivity NOTIFY visualizerSensitivityChanged FINAL)
     Q_PROPERTY(int streamingQuality READ streamingQuality WRITE setStreamingQuality NOTIFY streamingQualityChanged FINAL)
+    Q_PROPERTY(bool normalizeVolume READ normalizeVolume WRITE setNormalizeVolume NOTIFY normalizeVolumeChanged FINAL)
     Q_PROPERTY(bool crossfadeEnabled READ crossfadeEnabled WRITE setCrossfadeEnabled NOTIFY crossfadeEnabledChanged FINAL)
     Q_PROPERTY(int crossfadeDurationSeconds READ crossfadeDurationSeconds WRITE setCrossfadeDurationSeconds NOTIFY crossfadeDurationSecondsChanged FINAL)
     /// how much of the songs streamed is kept, so playing one again needs no
@@ -69,7 +88,13 @@ class Settings : public QObject {
     Q_PROPERTY(QString discordApplicationId READ discordApplicationId WRITE setDiscordApplicationId NOTIFY discordApplicationIdChanged FINAL)
     Q_PROPERTY(bool connectPresenceEnabled READ connectPresenceEnabled WRITE setConnectPresenceEnabled NOTIFY connectPresenceEnabledChanged FINAL)
     Q_PROPERTY(QString connectDeviceName READ connectDeviceName WRITE setConnectDeviceName NOTIFY connectDeviceNameChanged FINAL)
+    Q_PROPERTY(bool loggingEnabled READ isLoggingEnabled WRITE setLoggingEnabled NOTIFY loggingEnabledChanged FINAL)
+    Q_PROPERTY(bool loggingActive READ isLoggingActive CONSTANT FINAL)
+    Q_PROPERTY(QString logDirectory READ logDirectory CONSTANT FINAL)
+    Q_PROPERTY(QString logFilePath READ logFilePath CONSTANT FINAL)
     Q_PROPERTY(QString language READ language WRITE setLanguage NOTIFY languageChanged FINAL)
+    Q_PROPERTY(bool russianEnabled READ isRussianEnabled NOTIFY languageAvailabilityChanged FINAL)
+    Q_PROPERTY(QString disabledLanguageMessage READ disabledLanguageMessage CONSTANT FINAL)
 
 public:
     /// the default file, ~/.config/Swiftify/Swiftify.conf. no default argument:
@@ -120,6 +145,8 @@ public:
     int songCacheMegabytes() const { return m_songCacheMegabytes; }
     void setSongCacheMegabytes(int megabytes);
     void setStreamingQuality(int value);
+    bool normalizeVolume() const { return m_normalizeVolume; }
+    void setNormalizeVolume(bool value);
     bool crossfadeEnabled() const { return m_crossfadeEnabled; }
     void setCrossfadeEnabled(bool value);
     int crossfadeDurationSeconds() const { return m_crossfadeDurationSeconds; }
@@ -187,6 +214,18 @@ public:
     void setConnectDeviceName(const QString &value);
     QString language() const { return m_language; }
     void setLanguage(const QString &value);
+    bool isLoggingEnabled() const { return m_loggingEnabled; }
+    void setLoggingEnabled(bool value);
+    bool isLoggingActive() const;
+    QString logDirectory() const;
+    QString logFilePath() const;
+    Q_INVOKABLE void openLogsFolder() const;
+    Q_INVOKABLE void openLogFile() const;
+    bool isRussianEnabled() const;
+    QString disabledLanguageMessage() const;
+    Q_INVOKABLE bool isLanguageEnabled(const QString &language) const;
+    void enforceEnabledLanguage();
+    bool takeRevertedDisabledLanguage();
 
 signals:
     void visualizersEnabledChanged();
@@ -199,6 +238,7 @@ signals:
     void visualizerShapeChanged();
     void visualizerSensitivityChanged();
     void streamingQualityChanged();
+    void normalizeVolumeChanged();
     void crossfadeEnabledChanged();
     void crossfadeDurationSecondsChanged();
     void songCacheMegabytesChanged();
@@ -228,7 +268,9 @@ signals:
     void discordApplicationIdChanged();
     void connectPresenceEnabledChanged();
     void connectDeviceNameChanged();
+    void loggingEnabledChanged();
     void languageChanged();
+    void languageAvailabilityChanged();
 
 private:
     void load();
@@ -245,6 +287,7 @@ private:
     QString m_visualizerShape = QStringLiteral("bars");
     double m_visualizerSensitivity = 1.0;
     int m_streamingQuality = 160;
+    bool m_normalizeVolume = false;
     bool m_crossfadeEnabled = false;
     int m_crossfadeDurationSeconds = 5;
     int m_songCacheMegabytes = 1000;
@@ -279,6 +322,8 @@ private:
     bool m_connectPresenceEnabled = false;
     QString m_connectDeviceName = QStringLiteral("Swiftify");
     QString m_language = QStringLiteral("system");
+    bool m_loggingEnabled = false;
+    bool m_revertedDisabledLanguage = false;
 };
 
 } // namespace swiftify

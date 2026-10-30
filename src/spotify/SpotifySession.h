@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #pragma once
 
 #include "core/Async.h"
@@ -203,6 +221,7 @@ private:
     void setEvaluatingStoredLogin(bool evaluating);
     void setLoginPurpose(std::optional<LoginPurpose> purpose, const QUrl &url = {});
     void reportError(const QString &message);
+    void clearReportedError();
 
     PlaybackCore *m_core;
     CredentialStore *m_credentials;
@@ -248,6 +267,7 @@ private:
 
     std::function<void(const QUrl &)> m_openInBackground;
     std::optional<LoginPurpose> m_repairing;
+    QString m_reportedError;
     QList<LoginPurpose> m_repairQueue;
     QDateTime m_lastRepair[2];
     /// the login under way was started by a repair, and has not yet asked

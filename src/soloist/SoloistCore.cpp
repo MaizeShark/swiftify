@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include "soloist/SoloistCore.h"
 
 #include "app/Paths.h"
@@ -5,10 +23,14 @@
 #ifdef SWIFTIFY_DESKTOP_INTEGRATION
 #include "soloist/SoloistAudioRoute.h"
 #endif
+#ifdef Q_OS_WIN
+#include "soloist/SoloistLoopback.h"
+#endif
 
 #include <swiftify_core.h>
 
 #include <QCoroSignal>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -25,6 +47,11 @@
 #ifdef Q_OS_LINUX
 #include <csignal>
 #include <sys/prctl.h>
+#elif defined(Q_OS_MACOS)
+#include <csignal>
+#include <libproc.h>
+#elif defined(Q_OS_WIN)
+#include <windows.h>
 #endif
 
 Q_LOGGING_CATEGORY(lcSoloist, "swiftify.soloist")
@@ -72,6 +99,36 @@ SoloistCore::SoloistCore(PlaybackCore *fallback, SoloistConfig config, QObject *
     // soloist goes with a swiftify that crashes or is killed too. one left
     // behind holds the data directory, and the next soloist will not start
     m_process.setChildProcessModifier([] { ::prctl(PR_SET_PDEATHSIG, SIGTERM); });
+#elif defined(Q_OS_WIN)
+    m_process.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *args) {
+        args->flags |= CREATE_NO_WINDOW;
+    });
+    m_job = ::CreateJobObjectW(nullptr, nullptr);
+    if (m_job) {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION info{};
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        ::SetInformationJobObject(m_job, JobObjectExtendedLimitInformation, &info, sizeof(info));
+    }
+    m_loopback = std::make_unique<SoloistLoopback>([this](const float *samples, qsizetype count) {
+        // a file of the person's own reaches the analyser as it plays
+        if (!m_localActive) {
+            m_fallback->analyseLive(samples, count, m_heardGain);
+        }
+    });
+    connect(&m_process, &QProcess::started, this, [this] {
+        // soloist plays straight to the speakers here; the visualizers hear it
+        // through a loopback of it instead
+        if (qEnvironmentVariable("SWIFTIFY_SOLOIST_ROUTE") != QLatin1StringView("off")) {
+            m_loopback->start(quint32(m_process.processId()));
+        }
+        if (!m_job) {
+            return;
+        }
+        if (HANDLE child = ::OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, FALSE, DWORD(m_process.processId()))) {
+            ::AssignProcessToJobObject(m_job, child);
+            ::CloseHandle(child);
+        }
+    });
 #endif
     connect(&m_process, &QProcess::readyRead, this, [this] {
         const QString output = QString::fromUtf8(m_process.readAll());
@@ -81,6 +138,9 @@ SoloistCore::SoloistCore(PlaybackCore *fallback, SoloistConfig config, QObject *
         m_processOutput = (m_processOutput + output).right(kOutputTail);
     });
     connect(&m_process, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
+#ifdef Q_OS_WIN
+        m_loopback->stop();
+#endif
         m_portWatch.stop();
         m_socket.abort();
         m_socketOpen = false;
@@ -139,17 +199,31 @@ SoloistCore::SoloistCore(PlaybackCore *fallback, SoloistConfig config, QObject *
 
 SoloistCore::~SoloistCore()
 {
+#ifdef Q_OS_WIN
+    // its thread reads this core, so it goes first
+    m_loopback->stop();
+#endif
     m_portWatch.stop();
     m_socket.disconnect(this);
     m_socket.abort();
     if (m_process.state() != QProcess::NotRunning) {
         m_process.disconnect(this);
+#ifdef Q_OS_WIN
+        m_process.kill();
+        m_process.waitForFinished(1000);
+#else
         m_process.terminate();
         if (!m_process.waitForFinished(2000)) {
             m_process.kill();
             m_process.waitForFinished(1000);
         }
+#endif
     }
+#ifdef Q_OS_WIN
+    if (m_job) {
+        ::CloseHandle(m_job);
+    }
+#endif
 }
 
 std::optional<SoloistConfig> SoloistCore::detect()
@@ -165,9 +239,19 @@ std::optional<SoloistConfig> SoloistCore::detect()
     }
     if (config.program.isEmpty()) {
         // a launcher's PATH often leaves out ~/.local/bin, where soloist's
-        // guide installs it without sudo
-        config.program = QStandardPaths::findExecutable(QStringLiteral("soloist"),
-                                                        {QDir::homePath() + QStringLiteral("/.local/bin")});
+        // guide installs it without sudo, and homebrew's bin on macos
+        const QStringList extraPaths{
+            QCoreApplication::applicationDirPath(),
+            QDir::homePath() + QStringLiteral("/.local/bin"),
+#ifdef Q_OS_MACOS
+            QStringLiteral("/opt/homebrew/bin"),
+            QStringLiteral("/usr/local/bin"),
+#elif defined(Q_OS_WIN)
+            QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + QStringLiteral("/soloist"),
+            QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/Programs/soloist"),
+#endif
+        };
+        config.program = QStandardPaths::findExecutable(QStringLiteral("soloist"), extraPaths);
     }
     if (config.program.isEmpty()) {
         qCInfo(lcSoloist) << "Soloist not found; playing through librespot";
@@ -176,10 +260,24 @@ std::optional<SoloistConfig> SoloistCore::detect()
 
     config.apiKey = qEnvironmentVariable("SOLOIST_API_KEY").trimmed();
     if (config.apiKey.isEmpty()) {
-        QFile file(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
-                   + QStringLiteral("/soloist/api-key"));
-        if (file.open(QIODevice::ReadOnly)) {
-            config.apiKey = QString::fromUtf8(file.readAll()).trimmed();
+        const QString configDir = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
+        const QString dotConfig = QDir::homePath() + QStringLiteral("/.config");
+        const QStringList candidates{
+            configDir + QStringLiteral("/soloist/api-key"),
+            dotConfig + QStringLiteral("/soloist/api-key"),
+#ifdef Q_OS_WIN
+            configDir + QStringLiteral("/soloist/api-key.txt"),
+            dotConfig + QStringLiteral("/soloist/api-key.txt"),
+#endif
+        };
+        for (const QString &path : candidates) {
+            QFile file(path);
+            if (file.open(QIODevice::ReadOnly)) {
+                config.apiKey = QString::fromUtf8(file.readAll()).trimmed();
+                if (!config.apiKey.isEmpty()) {
+                    break;
+                }
+            }
         }
     }
     if (config.apiKey.isEmpty()) {
@@ -202,6 +300,19 @@ void SoloistCore::startDaemon()
     m_failure.clear();
     m_processOutput.clear();
     QDir().mkpath(m_config.dataDirectory);
+#ifdef Q_OS_MACOS
+    // macos has no PR_SET_PDEATHSIG; a soloist left behind by a killed
+    // swiftify holds the data directory until it is stopped
+    if (QFile pidFile(m_config.dataDirectory + QStringLiteral("/soloist.pid")); pidFile.open(QIODevice::ReadOnly)) {
+        bool ok = false;
+        const pid_t pid = pidFile.readAll().trimmed().toInt(&ok);
+        char path[PROC_PIDPATHINFO_MAXSIZE]{};
+        if (ok && pid > 1 && ::proc_pidpath(pid, path, sizeof(path)) > 0
+            && QString::fromUtf8(path).endsWith(QLatin1StringView("/soloist"))) {
+            ::kill(pid, SIGTERM);
+        }
+    }
+#endif
 #ifdef SWIFTIFY_DESKTOP_INTEGRATION
     if (!m_route && qEnvironmentVariable("SWIFTIFY_SOLOIST_ROUTE") != QLatin1StringView("off")) {
         // recorded at the rate swiftify's output plays at, so it is played
@@ -302,6 +413,29 @@ void SoloistCore::handleMessage(const QString &text)
         applyPosition(message.value(QStringLiteral("position")).toObject());
     } else if (type == QLatin1StringView("device_changed")) {
         m_active = message.value(QStringLiteral("is_active")).toBool();
+        if (message.contains(QStringLiteral("volume"))) {
+            const int vol = message.value(QStringLiteral("volume")).toInt(-1);
+            if (vol >= 0 && vol <= 100) {
+                const float newVol = float(vol) / 100.0f;
+                if (std::abs(newVol - m_volume) >= 0.005f) {
+                    m_volume = newVol;
+                    m_heardGain = heardGain(m_volume);
+                    emit remoteVolumeChanged(m_volume);
+                }
+            }
+        }
+    } else if (type == QLatin1StringView("volume_changed")) {
+        if (message.contains(QStringLiteral("volume"))) {
+            const int vol = message.value(QStringLiteral("volume")).toInt(-1);
+            if (vol >= 0 && vol <= 100) {
+                const float newVol = float(vol) / 100.0f;
+                if (std::abs(newVol - m_volume) >= 0.005f) {
+                    m_volume = newVol;
+                    m_heardGain = heardGain(m_volume);
+                    emit remoteVolumeChanged(m_volume);
+                }
+            }
+        }
     } else if (type == QLatin1StringView("options_changed")) {
         m_repeat = message.value(QStringLiteral("options")).toObject().value(QStringLiteral("repeat")).toString();
     } else if (type == QLatin1StringView("error")) {
@@ -337,6 +471,10 @@ void SoloistCore::followRemote()
             } catch (const SpotifyError &) {
             }
             m_localActive = false;
+            try {
+                m_fallback->setVolume(m_routed ? 1.0f : m_volume);
+            } catch (const SpotifyError &) {
+            }
         }
         playRouted();
         gate(false);
@@ -424,6 +562,17 @@ void SoloistCore::applyPlaybackState(const QJsonObject &state)
     if (state.contains(QStringLiteral("options"))) {
         m_repeat = state.value(QStringLiteral("options")).toObject().value(QStringLiteral("repeat")).toString();
     }
+    if (state.contains(QStringLiteral("volume"))) {
+        const int vol = state.value(QStringLiteral("volume")).toInt(-1);
+        if (vol >= 0 && vol <= 100) {
+            const float newVol = float(vol) / 100.0f;
+            if (std::abs(newVol - m_volume) >= 0.005f) {
+                m_volume = newVol;
+                m_heardGain = heardGain(m_volume);
+                emit remoteVolumeChanged(m_volume);
+            }
+        }
+    }
 }
 
 void SoloistCore::applyItem(const QJsonObject &item)
@@ -508,7 +657,7 @@ void SoloistCore::gate(bool closed)
     m_gated = closed;
     m_gatedAtMs = nowMs();
     try {
-        m_fallback->setVolume(closed ? 0.0f : m_volume);
+        m_fallback->setVolume(closed ? 0.0f : (m_localActive ? m_volume : 1.0f));
     } catch (const SpotifyError &) {
     }
 }
@@ -556,7 +705,15 @@ QCoro::Task<> SoloistCore::ensureReady(quint64 resets)
 
 int SoloistCore::soloistVolume() const
 {
-    return m_routed ? 100 : int(std::lround(std::clamp(m_volume, 0.0f, 1.0f) * 100));
+    return int(std::lround(std::clamp(m_volume, 0.0f, 1.0f) * 100));
+}
+
+float SoloistCore::heardGain(float volume)
+{
+    // soloist turns its 0-100 down by about half a decibel a step, 50db in
+    // all (measured from its output); 0 is silent
+    const float steps = std::round(std::clamp(volume, 0.0f, 1.0f) * 100);
+    return steps <= 0 ? 0.0f : std::pow(10.0f, (steps - 100) * 0.5f / 20);
 }
 
 void SoloistCore::playRouted()
@@ -594,6 +751,10 @@ QCoro::Task<> SoloistCore::playTrack(QString spotifyUri)
         } catch (const SpotifyError &) {
         }
         m_localActive = false;
+        try {
+            m_fallback->setVolume(m_routed ? 1.0f : m_volume);
+        } catch (const SpotifyError &) {
+        }
     }
     m_expectedUri = spotifyUri;
     m_expectedStarted = false;
@@ -610,7 +771,6 @@ QCoro::Task<> SoloistCore::playTrack(QString spotifyUri)
     // swiftify's output takes soloist's sink over again: after a file, the
     // file output played that instead
     playRouted();
-    send(QStringLiteral("set_volume"), {{QStringLiteral("volume"), soloistVolume()}});
     send(QStringLiteral("play"), {{QStringLiteral("uri"), spotifyUri}});
     const quint64 sentAt = m_messages;
     bool replayed = false;
@@ -686,6 +846,10 @@ QCoro::Task<> SoloistCore::playFile(QString path)
     m_remote = false;
     gate(false);
     m_localActive = true;
+    try {
+        m_fallback->setVolume(m_volume);
+    } catch (const SpotifyError &) {
+    }
     co_await m_fallback->playFile(path);
 }
 
@@ -739,14 +903,13 @@ void SoloistCore::seek(quint32 positionMs)
 void SoloistCore::setVolume(float volume)
 {
     m_volume = std::clamp(volume, 0.0f, 1.0f);
+    m_heardGain = heardGain(m_volume);
     try {
-        // held at nothing while the gap between songs is gated
-        m_fallback->setVolume(m_gated ? 0.0f : m_volume);
+        // held at nothing while the gap between songs is gated; otherwise unity gain for routed soloist
+        m_fallback->setVolume(m_gated ? 0.0f : (m_routed && !m_localActive ? 1.0f : m_volume));
     } catch (const SpotifyError &) {
     }
-    if (!m_routed) {
-        send(QStringLiteral("set_volume"), {{QStringLiteral("volume"), soloistVolume()}});
-    }
+    send(QStringLiteral("set_volume"), {{QStringLiteral("volume"), soloistVolume()}});
 }
 
 bool SoloistCore::audioOutputStalled() const
@@ -865,6 +1028,11 @@ void SoloistCore::setStreamQuality(int kbps)
     m_fallback->setStreamQuality(kbps);
 }
 
+void SoloistCore::setVolumeNormalization(bool enabled)
+{
+    m_fallback->setVolumeNormalization(enabled);
+}
+
 void SoloistCore::setAudioCache(const QString &path, qint64 limitBytes)
 {
     m_fallback->setAudioCache(path, limitBytes);
@@ -878,6 +1046,11 @@ void SoloistCore::setConnectReporting(bool enabled, const QString &deviceName)
 void SoloistCore::setPlaybackShaping(float tempo, float pitchSemitones, bool preservesPitch)
 {
     m_fallback->setPlaybackShaping(tempo, pitchSemitones, preservesPitch);
+}
+
+void SoloistCore::setPreampGain(float gainDb)
+{
+    m_fallback->setPreampGain(gainDb);
 }
 
 void SoloistCore::setEqualizer(const QList<float> &gainsDb)
@@ -897,8 +1070,7 @@ void SoloistCore::setSpectrumEnabled(bool enabled)
 
 int SoloistCore::spectrumLevels(float *out, int capacity) const
 {
-    // unrouted, soloist's audio goes straight to pipewire, past the analyser
-    return m_localActive || m_routed ? m_fallback->spectrumLevels(out, capacity) : 0;
+    return m_fallback->spectrumLevels(out, capacity);
 }
 
 } // namespace swiftify

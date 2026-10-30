@@ -1,7 +1,31 @@
-#include "app/Settings.h"
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 
+#include "app/Settings.h"
+#include "app/ErrorCenter.h"
+#include "app/Logging.h"
+#include "app/Paths.h"
+#include "app/Translations.h"
+
+#include <QDesktopServices>
 #include <QQmlEngine>
 #include <QRegularExpression>
+#include <QUrl>
 
 #include <algorithm>
 #include <initializer_list>
@@ -120,6 +144,7 @@ void Settings::load()
         const int cache = stored<int>(m_store, "songCacheMegabytes", m_songCacheMegabytes);
         m_songCacheMegabytes = cache == 500 || cache == 2000 ? cache : 1000;
     }
+    m_normalizeVolume = stored<bool>(m_store, "normalizeVolume", m_normalizeVolume);
     m_crossfadeEnabled = stored<bool>(m_store, "crossfadeEnabled", m_crossfadeEnabled);
     m_crossfadeDurationSeconds = std::clamp(
         stored<int>(m_store, "crossfadeDurationSeconds", m_crossfadeDurationSeconds), 1, 12);
@@ -133,6 +158,7 @@ void Settings::load()
         m_backdropReactivity = std::clamp(raw, 0.0, 3.0);
     }
     m_debuggingEnabled = stored<bool>(m_store, "debuggingEnabled", m_debuggingEnabled);
+    m_loggingEnabled = stored<bool>(m_store, "loggingEnabled", m_loggingEnabled);
     m_pinnedPlaylistsExpanded = stored<bool>(m_store, "pinnedPlaylistsExpanded", m_pinnedPlaylistsExpanded);
     m_allPlaylistsExpanded = stored<bool>(m_store, "allPlaylistsExpanded", m_allPlaylistsExpanded);
     {
@@ -182,8 +208,21 @@ void Settings::load()
     if (!deviceName.isEmpty()) {
         m_connectDeviceName = deviceName;
     }
-    m_language = oneOf(stored<QString>(m_store, "language", m_language),
-                      {QStringLiteral("system"), QStringLiteral("en"), QStringLiteral("ru")}, QStringLiteral("system"));
+    const QString configuredLanguage = oneOf(
+        stored<QString>(m_store, "language", m_language),
+        {QStringLiteral("system"), QStringLiteral("en"), QStringLiteral("ru")},
+        QStringLiteral("system"));
+    if (!Translations::isLanguageEnabled(configuredLanguage)) {
+        m_language = QStringLiteral("en");
+        m_store.setValue(QStringLiteral("language"), m_language);
+        m_revertedDisabledLanguage = true;
+        if (auto *errors = ErrorCenter::instance()) {
+            errors->show(Translations::disabledLanguageErrorMessage());
+            m_revertedDisabledLanguage = false;
+        }
+    } else {
+        m_language = configuredLanguage;
+    }
 
 }
 
@@ -288,6 +327,16 @@ void Settings::setStreamingQuality(int raw)
     m_streamingQuality = value;
     m_store.setValue(QStringLiteral("streamingQuality"), value);
     emit streamingQualityChanged();
+}
+
+void Settings::setNormalizeVolume(bool value)
+{
+    if (m_normalizeVolume == value) {
+        return;
+    }
+    m_normalizeVolume = value;
+    m_store.setValue(QStringLiteral("normalizeVolume"), value);
+    emit normalizeVolumeChanged();
 }
 
 void Settings::setSongCacheMegabytes(int megabytes)
@@ -588,13 +637,92 @@ void Settings::setConnectDeviceName(const QString &raw)
 
 void Settings::setLanguage(const QString &raw)
 {
-    const QString value = oneOf(raw, {QStringLiteral("system"), QStringLiteral("en"), QStringLiteral("ru")}, QStringLiteral("system"));
+    QString value = oneOf(raw, {QStringLiteral("system"), QStringLiteral("en"), QStringLiteral("ru")}, QStringLiteral("system"));
+    if (!Translations::isLanguageEnabled(value)) {
+        value = QStringLiteral("en");
+    }
     if (m_language == value) return;
     m_language = value;
     m_store.setValue(QStringLiteral("language"), value);
     emit languageChanged();
 }
 
+bool Settings::isRussianEnabled() const
+{
+    return Translations::isLanguageEnabled(QStringLiteral("ru"));
+}
 
+QString Settings::disabledLanguageMessage() const
+{
+    return Translations::disabledLanguageMessage();
+}
+
+bool Settings::isLanguageEnabled(const QString &language) const
+{
+    return Translations::isLanguageEnabled(language);
+}
+
+void Settings::enforceEnabledLanguage()
+{
+    const bool reverted = !Translations::isLanguageEnabled(m_language);
+    if (reverted) {
+        m_language = QStringLiteral("en");
+        m_store.setValue(QStringLiteral("language"), m_language);
+        m_revertedDisabledLanguage = true;
+        if (auto *errors = ErrorCenter::instance()) {
+            errors->show(Translations::disabledLanguageErrorMessage());
+            m_revertedDisabledLanguage = false;
+        }
+    }
+    emit languageAvailabilityChanged();
+    if (reverted) {
+        emit languageChanged();
+    }
+}
+
+bool Settings::takeRevertedDisabledLanguage()
+{
+    const bool reverted = m_revertedDisabledLanguage;
+    m_revertedDisabledLanguage = false;
+    return reverted;
+}
+
+void Settings::setLoggingEnabled(bool value)
+{
+    if (m_loggingEnabled == value) {
+        return;
+    }
+    m_loggingEnabled = value;
+    m_store.setValue(QStringLiteral("loggingEnabled"), value);
+    if (value) {
+        logging::applyEnvironmentVariables();
+    }
+    emit loggingEnabledChanged();
+}
+
+bool Settings::isLoggingActive() const
+{
+    return logging::isActive();
+}
+
+QString Settings::logDirectory() const
+{
+    return paths::logDirectory();
+}
+
+QString Settings::logFilePath() const
+{
+    return paths::logFilePath();
+}
+
+void Settings::openLogsFolder() const
+{
+    QDesktopServices::openUrl(QUrl::fromLocalFile(paths::logDirectory()));
+}
+
+void Settings::openLogFile() const
+{
+    QDesktopServices::openUrl(QUrl::fromLocalFile(paths::logFilePath()));
+}
 
 } // namespace swiftify

@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
@@ -213,6 +231,29 @@ Item {
                 StyledText {
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("Normalize volume")
+                    font.pixelSize: Appearance.fontSize.small
+                    font.weight: Font.DemiBold
+                    color: "white"
+                }
+                StyledSwitch {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    scheme: root.scheme
+                    checked: Settings.normalizeVolume
+                    onToggled: Settings.normalizeVolume = checked
+                }
+            }
+        }
+
+        Card {
+            Item {
+                width: parent.width
+                height: 32
+
+                StyledText {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
                     text: qsTr("Equalizer")
                     font.pixelSize: Appearance.fontSize.small
                     font.weight: Font.DemiBold
@@ -268,6 +309,42 @@ Item {
                         onToggled: Sound.equalizerEnabled = checked
                     }
                 }
+            }
+
+            Row {
+                width: parent.width
+                height: 26
+                spacing: 8
+
+                StyledText {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("Gain")
+                    font.pixelSize: Appearance.fontSize.smaller
+                    color: root.secondaryText
+                }
+                Item { width: Math.max(0, parent.width - gainSlider.width - gainValue.width - parent.spacing * 2); height: 1 }
+                StyledText {
+                    id: gainValue
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: (Sound.preampGain > 0 ? "+" : "") + Sound.preampGain.toFixed(1) + qsTr(" dB")
+                    tabularNumbers: true
+                    font.pixelSize: Appearance.fontSize.smaller
+                    font.weight: Font.DemiBold
+                    color: Math.abs(Sound.preampGain) > 0.01 ? root.accent : "white"
+                }
+            }
+            StyledSlider {
+                id: gainSlider
+                objectName: "immersivePreampGainSlider"
+                width: parent.width
+                scheme: root.scheme
+                from: -12
+                to: 12
+                stepSize: 0.5
+                value: Sound.preampGain
+                trackThickness: 10
+                snapMode: T.Slider.SnapAlways
+                onMoved: Sound.preampGain = value
             }
 
             Item {
@@ -480,7 +557,7 @@ Item {
         StyledMenuItem {
             text: qsTr("Reset")
             symbol: "restart_alt"
-            enabled: !Sound.flat
+            enabled: !Sound.flat || Math.abs(Sound.preampGain) > 0.01
             onTriggered: Sound.reset()
         }
 

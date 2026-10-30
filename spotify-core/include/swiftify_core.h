@@ -1,4 +1,22 @@
 /*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/*
  * the c interface to spotify-core, built with `--features capi`. it mirrors
  * the swift-bridge interface the apple apps use (src/swift_ffi.rs).
  *
@@ -45,7 +63,7 @@ bool swiftify_core_take_completion(const SwiftifyCore *core, uint64_t *request_i
  * SWIFTIFY_CORE_SUPERSEDED, having started no sound. */
 #define SWIFTIFY_CORE_SUPERSEDED "the request was replaced by a newer one"
 /* a play call for a track spotify will not give this account fails with this */
-#define SWIFTIFY_CORE_UNAVAILABLE "Spotify could not load this track."
+#define SWIFTIFY_CORE_UNAVAILABLE "Spotify will not play this track."
 
 void swiftify_core_connect(const SwiftifyCore *core, uint64_t request_id, const char *access_token,
                            const char *client_id);
@@ -106,12 +124,14 @@ char *swiftify_core_pause(const SwiftifyCore *core);
 char *swiftify_core_seek(const SwiftifyCore *core, uint32_t position_ms);
 char *swiftify_core_set_volume(const SwiftifyCore *core, float volume);
 char *swiftify_core_set_stream_quality(const SwiftifyCore *core, uint32_t kbps);
+char *swiftify_core_set_volume_normalization(const SwiftifyCore *core, bool enabled);
 /* keeps streamed songs in path (empty: none), up to limit_bytes; applies the
  * next time playback connects */
 char *swiftify_core_set_audio_cache(const SwiftifyCore *core, const char *path,
                                     uint64_t limit_bytes);
 char *swiftify_core_set_playback_shaping(const SwiftifyCore *core, float tempo,
                                          float pitch_semitones, bool preserves_pitch);
+char *swiftify_core_set_preamp_gain(const SwiftifyCore *core, float gain_db);
 char *swiftify_core_set_equalizer(const SwiftifyCore *core, const float *gains_db, size_t count);
 
 /* native spotify-connect presence: when enabled, swiftify registers as a connect
@@ -148,6 +168,11 @@ void swiftify_live_buffer_push(const SwiftifyLiveBuffer *buffer, const float *sa
  * whatever played; one already playing carries on */
 char *swiftify_core_play_live(const SwiftifyCore *core, const SwiftifyLiveBuffer *buffer);
 void swiftify_core_stop_live(const SwiftifyCore *core);
+/* hands interleaved stereo audio, heard at output_gain of its full level, to
+ * the spectrum alone, for audio another program plays to the speakers
+ * itself. may be called from any thread. */
+void swiftify_core_analyse_live(const SwiftifyCore *core, const float *samples, size_t count,
+                                float output_gain);
 
 #ifdef __cplusplus
 }

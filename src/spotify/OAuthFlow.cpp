@@ -1,7 +1,26 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include "spotify/OAuthFlow.h"
 
 #include "spotify/SpotifyError.h"
 
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -20,11 +39,15 @@ namespace swiftify {
 
 namespace {
 
-const QByteArray kCallbackPage =
-    "<!doctype html><meta charset=utf-8><title>Swiftify</title>"
-    "<style>body{font:16px system-ui,sans-serif;background:#141313;color:#e6e1e1;"
-    "display:grid;place-items:center;height:100vh;margin:0}</style>"
-    "<p>You're signed in. You can close this tab and return to Swiftify.</p>";
+QByteArray callbackPage()
+{
+    return QByteArray("<!doctype html><meta charset=utf-8><title>Swiftify</title>"
+                      "<style>body{font:16px system-ui,sans-serif;background:#141313;color:#e6e1e1;"
+                      "display:grid;place-items:center;height:100vh;margin:0}</style><p>")
+        + QCoreApplication::translate("OAuthFlow", "You're signed in. You can close this tab and return to Swiftify.")
+              .toHtmlEscaped().toUtf8()
+        + "</p>";
+}
 
 QByteArray httpResponse(int status, const QByteArray &reason, const QByteArray &body)
 {
@@ -149,7 +172,7 @@ void OAuthFlow::handleRequest(QTcpSocket *socket)
         return;
     }
 
-    socket->write(httpResponse(200, "OK", kCallbackPage));
+    socket->write(httpResponse(200, "OK", callbackPage()));
     socket->disconnectFromHost();
     if (m_receivedCallback) {
         return;

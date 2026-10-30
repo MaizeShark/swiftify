@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include "app/Translations.h"
 #include "FakeCore.h"
 #include "ViewRig.h"
@@ -42,6 +60,7 @@
 #include <QQuickRenderTarget>
 #include <QQuickWindow>
 #include <QRegularExpression>
+#include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QSignalSpy>
 #include <QTest>
@@ -150,6 +169,75 @@ private:
     using Rig = swiftify::testing::ViewRig;
 
 private slots:
+    void englishLabelsKeepTheirOriginalWording()
+    {
+        Rig rig;
+        rig.settings.setLanguage(QStringLiteral("en"));
+        Translations translations(&rig.settings);
+        QQmlComponent phrase(&rig.engine);
+        phrase.setData("import QtQml\nimport Swiftify\n"
+                       "QtObject { property string text: UiState.catchphrase }", QUrl());
+        std::unique_ptr<QObject> object(phrase.create());
+        QVERIFY2(object, qPrintable(phrase.errorString()));
+        QCOMPARE(object->property("text").toString(), QStringLiteral("i mean i guess bro"));
+
+        const auto panel = rig.show(QStringLiteral("SleepTimerPanel"));
+        QVERIFY(panel);
+        QList<QQuickItem *> queue{panel.get()};
+        QStringList labels;
+        for (qsizetype index = 0; index < queue.size(); ++index) {
+            auto *item = queue.at(index);
+            queue.append(item->childItems());
+            if (item->objectName() == QLatin1StringView("segmentLabel")) labels.append(item->property("text").toString());
+        }
+        QCOMPARE(labels, QStringList({QStringLiteral("None"), QStringLiteral("Last 10 Seconds"), QStringLiteral("Whole Timer")}));
+
+        const auto stats = rig.show(QStringLiteral("StatsView"));
+        QVERIFY(stats);
+        QString hour;
+        QVERIFY(QMetaObject::invokeMethod(stats.get(), "hourName", Q_RETURN_ARG(QString, hour), Q_ARG(int, 13)));
+        QCOMPARE(hour, QStringLiteral("1 PM"));
+    }
+
+    void russianSleepTimerLabelsFitTheirSegments()
+    {
+        fonts::loadIconFont();
+        Rig rig;
+        rig.window->setColor(QColor(QStringLiteral("#423d58")));
+        rig.settings.setLanguage(QStringLiteral("ru"));
+        Translations translations(&rig.settings);
+        const auto panel = rig.show(QStringLiteral("SleepTimerPanel"));
+        QVERIFY(panel);
+        auto *picker = panel->findChild<QQuickItem *>(QStringLiteral("sleepTimerFadePicker"));
+        QVERIFY(picker);
+        for (int width : {380, 300}) {
+            panel->setWidth(width);
+            Rig::settle();
+            rig.render();
+            if (width == 380) {
+                const QString path = qEnvironmentVariable("SWIFTIFY_TEST_SCREENSHOT");
+                if (!path.isEmpty()) {
+                    const qreal ratio = rig.window->devicePixelRatio();
+                    QVERIFY(rig.render().copy(0, 0, qRound(width * ratio),
+                                              qRound((panel->implicitHeight() + 8) * ratio)).save(path));
+                }
+            }
+            QList<QQuickItem *> labels;
+            QList<QQuickItem *> queue{picker};
+            for (qsizetype index = 0; index < queue.size(); ++index) {
+                auto *item = queue.at(index);
+                queue.append(item->childItems());
+                if (item->objectName() == QLatin1StringView("segmentLabel")) labels.append(item);
+            }
+            QCOMPARE(labels.size(), 3);
+            QCOMPARE(labels.at(1)->property("text").toString(), QStringLiteral("За 10 с"));
+            for (auto *label : labels) {
+                QVERIFY(label->width() > 0);
+                QVERIFY(label->property("contentWidth").toReal() <= label->width() + 1);
+            }
+        }
+    }
+
     void fullScreenVisualizerCanBeDisabledIndependently()
     {
         Rig rig;
@@ -180,6 +268,9 @@ private slots:
 
     void languageSelectionRetranslatesTheSettings()
     {
+        if (!kRussianTranslationEnabled) {
+            QSKIP("Russian translation is disabled.");
+        }
         Rig rig;
         rig.settings.setLanguage(QStringLiteral("en"));
         Translations translations(&rig.settings);
@@ -201,6 +292,77 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(selection, "activated", Q_ARG(int, 1)));
         QCOMPARE(rig.settings.language(), QStringLiteral("en"));
         QCOMPARE(selection->property("text").toString(), QStringLiteral("Interface language"));
+    }
+
+    void disabledLanguageIsGrayedOutWithTooltipAndSwitchesBackToEnglish()
+    {
+        const auto restore = qScopeGuard([] { Translations::resetLanguageEnabled(); });
+        Translations::setLanguageEnabled(QStringLiteral("ru"), true);
+        Rig rig;
+        rig.settings.setLanguage(QStringLiteral("ru"));
+        Translations translations(&rig.settings);
+        connect(&translations, &Translations::languageChanged, &rig.engine, &QQmlEngine::retranslate);
+        const auto pages = rig.show(QStringLiteral("SettingsPages"));
+        QVERIFY(pages);
+        pages->setProperty("page", 4);
+        Rig::settle();
+
+        Translations::setLanguageEnabled(QStringLiteral("ru"), false);
+        Rig::settle();
+        rig.render();
+
+        QCOMPARE(rig.settings.language(), QStringLiteral("en"));
+        QCOMPARE(rig.errors.message(),
+                 QStringLiteral("this language is currently disabled due to missing language maintainers. your app language has been switched back to english."));
+
+        auto *selection = pages->findChild<QQuickItem *>(QStringLiteral("languageSelection"));
+        QVERIFY(selection);
+        QCOMPARE(selection->property("currentIndex").toInt(), 1);
+
+        QQmlListReference segments(selection, "segments");
+        QCOMPARE(segments.count(), 3);
+        QObject *russianSegment = segments.at(2);
+        QVERIFY(russianSegment);
+        QCOMPARE(russianSegment->property("enabled").toBool(), false);
+        QCOMPARE(russianSegment->property("tooltip").toString(),
+                 QStringLiteral("this language is currently disabled due to missing language maintainers"));
+
+        QQuickItem *russianButton = nullptr;
+        QList<QQuickItem *> queue {selection};
+        for (qsizetype i = 0; i < queue.size(); ++i) {
+            QQuickItem *item = queue.at(i);
+            queue.append(item->childItems());
+            if (item->property("tooltip").toString()
+                == QStringLiteral("this language is currently disabled due to missing language maintainers")) {
+                russianButton = item;
+                break;
+            }
+        }
+        QVERIFY(russianButton);
+        QCOMPARE(russianButton->isEnabled(), false);
+        QVERIFY(qFuzzyCompare(russianButton->opacity(), 0.38));
+
+        const QPoint hoverPoint = russianButton->mapToScene(
+            QPointF(russianButton->width() / 2.0, russianButton->height() / 2.0)).toPoint();
+        QMouseEvent move(QEvent::MouseMove, hoverPoint, hoverPoint, Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(rig.window.get(), &move);
+        Rig::settle();
+        rig.render();
+
+        bool foundTooltip = false;
+        QList<QQuickItem *> tooltipQueue {selection};
+        for (qsizetype i = 0; i < tooltipQueue.size(); ++i) {
+            QQuickItem *item = tooltipQueue.at(i);
+            tooltipQueue.append(item->childItems());
+            if (QObject *loaded = item->property("item").value<QObject *>()) {
+                if (loaded->property("text").toString()
+                    == QStringLiteral("this language is currently disabled due to missing language maintainers")) {
+                    foundTooltip = true;
+                    break;
+                }
+            }
+        }
+        QVERIFY(foundTooltip);
     }
 
     void initTestCase()
@@ -580,6 +742,24 @@ private slots:
         QCOMPARE(titleItem->property("text").toString(), shortSong.name);
         QVERIFY(!titleItem->property("overflows").toBool());
         QVERIFY(!titleItem->property("shouldScroll").toBool());
+
+        auto *artistItem = player->findChild<QQuickItem *>(QStringLiteral("immersiveArtist"));
+        QVERIFY(artistItem);
+        const qreal oldArtistWidth = artistItem->implicitWidth();
+        QVERIFY(oldArtistWidth > 0);
+
+        Song longArtistSong = shortSong;
+        longArtistSong.instanceId = Song().instanceId;
+        longArtistSong.artists = QStringLiteral("A Vastly Longer Ensemble Orchestra Featuring Multiple Artists");
+        queue[0] = longArtistSong;
+        rig.player.play(queue[0], queue);
+        Rig::settle();
+        const auto call3 = rig.core.take(QStringLiteral("playFile"));
+        QVERIFY(call3);
+        call3->succeed();
+        Rig::settle();
+
+        QTRY_VERIFY(artistItem->implicitWidth() > oldArtistWidth);
     }
 
     void multilineLyricsStayInsideTheirHighlight_data()
@@ -2269,6 +2449,33 @@ private slots:
         }
         QVERIFY(saved);
         QCOMPARE(texts(saved), QStringList {QStringLiteral("Mine")});
+    }
+
+    void preampGainOffsetsVolumeAndResets()
+    {
+        Rig rig;
+        QCOMPARE(rig.sound.preampGain(), 0.0);
+        QCOMPARE(rig.core.preamp, 0.0f);
+        QVERIFY(rig.sound.isNeutral());
+
+        rig.sound.setPreampGain(4.5);
+        QCOMPARE(rig.sound.preampGain(), 4.5);
+        QCOMPARE(rig.core.preamp, 4.5f);
+        QVERIFY(!rig.sound.isNeutral());
+
+        rig.sound.reset();
+        QCOMPARE(rig.sound.preampGain(), 0.0);
+        QCOMPARE(rig.core.preamp, 0.0f);
+        QVERIFY(rig.sound.isNeutral());
+
+        const auto panel = rig.show(QStringLiteral("SoundPanel"));
+        QVERIFY(panel);
+        auto *slider = panel->findChild<QQuickItem *>(QStringLiteral("immersivePreampGainSlider"));
+        QVERIFY(slider);
+        slider->setProperty("value", 3.0);
+        QMetaObject::invokeMethod(slider, "moved");
+        QCOMPARE(rig.sound.preampGain(), 3.0);
+        QCOMPARE(rig.core.preamp, 3.0f);
     }
 
     /// every way to a new playlist, a local one, a song's info or a deletion

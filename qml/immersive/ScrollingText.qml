@@ -1,3 +1,21 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 pragma ComponentBehavior: Bound
 import QtQuick
 import Swiftify
@@ -22,7 +40,9 @@ Item {
 
     clip: true
 
-    implicitWidth: sample.implicitWidth
+    implicitWidth: (root.animateChange && !Appearance.performanceMode && label1.implicitWidth > 0)
+        ? Math.ceil(label1.implicitWidth)
+        : sample.implicitWidth
     implicitHeight: sample.implicitHeight
 
     readonly property real textWidth: Math.ceil(sample.implicitWidth)
@@ -74,6 +94,11 @@ Item {
             animateChange: root.animateChange
             width: (!root.shouldScroll && root.overflows) ? root.width : implicitWidth
             elide: (!root.shouldScroll && root.overflows) ? Text.ElideRight : Text.ElideNone
+            onTextChanged: {
+                if (root.animateChange && !Appearance.performanceMode) {
+                    root.resetPosition()
+                }
+            }
         }
 
         StyledText {
@@ -127,7 +152,12 @@ Item {
         }
     }
 
-    onTextChanged: resetPosition()
+    onTextChanged: {
+        scrollAnimation.stop()
+        if (!root.animateChange || Appearance.performanceMode) {
+            resetPosition()
+        }
+    }
     onWidthChanged: resetPosition()
     onShouldScrollChanged: resetPosition()
     onHorizontalAlignmentChanged: resetPosition()
