@@ -479,6 +479,9 @@ impl SpectrumSink {
     /// pipewire suspend/renegotiation clears on the first reopen and resets the
     /// count; only a device that truly stopped exhausts these.
     const MAX_STALL_RECOVERIES: u32 = 4;
+    /// how long to wait after dropping a faulted stream before reopening, to
+    /// let a pipewire node that just threw POLLERR settle.
+    const STALL_BACKOFF: Duration = Duration::from_millis(200);
 
     /// opened here rather than in new because new runs on librespot's own player thread,
     /// where a failure could only ever have been a panic.
@@ -653,7 +656,11 @@ impl Sink for SpectrumSink {
                 self.stall_recoveries,
                 Self::MAX_STALL_RECOVERIES
             );
+            // drop the faulted stream first so its error poll loop stops, then
+            // give the device a moment to settle before opening a fresh one: a
+            // pipewire node that just threw POLLERR is not ready instantly.
             self.output = None;
+            thread::sleep(Self::STALL_BACKOFF);
             self.ensure_output()?;
             if let Some(output) = &self.output
                 && output.stream.play().is_err()

@@ -56,13 +56,21 @@ where
     // system's work for each callback is most of what the stream costs, and
     // at about 21 ms it is still no longer than an analysis hop, so the
     // visualizers are fed as evenly as before. a device that will not take
-    // that is opened as it comes
-    let larger = match *supported.buffer_size() {
-        cpal::SupportedBufferSize::Range { min, max } => Some(cpal::StreamConfig {
-            buffer_size: cpal::BufferSize::Fixed(1_024_u32.clamp(min, max)),
-            ..config.clone()
-        }),
-        cpal::SupportedBufferSize::Unknown => None,
+    // that is opened as it comes.
+    //
+    // not on linux: pipewire's alsa compatibility layer throws
+    // `alsa::poll() returned POLLERR` and stops feeding the stream when a
+    // fixed period is forced on it, so there the device picks its own buffer.
+    let larger = if cfg!(target_os = "linux") {
+        None
+    } else {
+        match *supported.buffer_size() {
+            cpal::SupportedBufferSize::Range { min, max } => Some(cpal::StreamConfig {
+                buffer_size: cpal::BufferSize::Fixed(1_024_u32.clamp(min, max)),
+                ..config.clone()
+            }),
+            cpal::SupportedBufferSize::Unknown => None,
+        }
     };
     let stream = larger
         .and_then(|larger| {
