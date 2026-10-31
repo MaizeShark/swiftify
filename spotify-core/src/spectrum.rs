@@ -436,6 +436,9 @@ pub(crate) struct SpectrumSink {
     converter: Option<RateConverter>,
     /// chunks the device has played, freed here on the writing thread
     spent: Vec<PlayedChunk>,
+    /// consecutive times the device stopped draining and the stream was
+    /// reopened without recovering; reset as soon as a write drains normally.
+    stall_recoveries: u32,
 }
 
 impl SpectrumSink {
@@ -453,6 +456,7 @@ impl SpectrumSink {
             health,
             converter: None,
             spent: Vec::with_capacity(Self::QUEUE_HIGH_WATER * 2),
+            stall_recoveries: 0,
         }
     }
 }
@@ -470,6 +474,11 @@ impl SpectrumSink {
     const QUEUE_LOW_WATER: usize = 16;
     /// how often a full queue is checked: roughly two packets' worth.
     const QUEUE_POLL: Duration = Duration::from_millis(40);
+    /// how many times in a row a stalled device may be recovered by reopening
+    /// the stream before giving up and letting the app pause. a transient
+    /// pipewire suspend/renegotiation clears on the first reopen and resets the
+    /// count; only a device that truly stopped exhausts these.
+    const MAX_STALL_RECOVERIES: u32 = 4;
 
     /// opened here rather than in new because new runs on librespot's own player thread,
     /// where a failure could only ever have been a panic.
@@ -624,16 +633,44 @@ impl Sink for SpectrumSink {
 
         // the same bounded queue as librespot's rodio backend, refilled in
         // batches rather than one packet per wake.
-        if output.queue.len() > Self::QUEUE_HIGH_WATER
-            && !Self::drain_to(&output.queue, Self::QUEUE_LOW_WATER, Self::QUEUE_POLL)
-        {
-            self.mark_stalled();
-            return Err(SinkError::OnWrite(
-                "the audio output stopped accepting samples".to_owned(),
-            ));
+        let stalled = output.queue.len() > Self::QUEUE_HIGH_WATER
+            && !Self::drain_to(&output.queue, Self::QUEUE_LOW_WATER, Self::QUEUE_POLL);
+        if !stalled {
+            // the device is keeping up: forget any earlier stall.
+            self.stall_recoveries = 0;
+            return Ok(());
         }
 
-        Ok(())
+        // the device stopped draining what we hand it. on pipewire this is
+        // usually the output node being suspended or renegotiated, not the
+        // device leaving, so reopen the stream on the current default and carry
+        // on (one packet is dropped, far better than pausing). only give up and
+        // let the app pause if reopening keeps failing to drain.
+        if self.stall_recoveries < Self::MAX_STALL_RECOVERIES {
+            self.stall_recoveries += 1;
+            eprintln!(
+                "spotify-core: audio output stopped draining; reopening (attempt {}/{})",
+                self.stall_recoveries,
+                Self::MAX_STALL_RECOVERIES
+            );
+            self.output = None;
+            self.ensure_output()?;
+            if let Some(output) = &self.output
+                && output.stream.play().is_err()
+            {
+                self.mark_stalled();
+                return Err(SinkError::OnWrite(
+                    "the audio output could not be restarted".to_owned(),
+                ));
+            }
+            return Ok(());
+        }
+
+        self.stall_recoveries = 0;
+        self.mark_stalled();
+        Err(SinkError::OnWrite(
+            "the audio output stopped accepting samples".to_owned(),
+        ))
     }
 }
 

@@ -86,7 +86,12 @@ where
         (cpal::SampleFormat::F32, 2) => {
             let mut fill = fill;
             device
-                .build_output_stream::<f32, _, _>(config, move |data, _| fill(data), |_| {}, None)
+                .build_output_stream::<f32, _, _>(
+                    config,
+                    move |data, _| fill(data),
+                    |error| eprintln!("spotify-core: audio output stream error: {error}"),
+                    None,
+                )
                 .ok()
         }
         (cpal::SampleFormat::F32, _) => mapped_stream::<f32, F>(device, config, fill),
@@ -131,7 +136,7 @@ where
                     }
                 }
             },
-            |_| {},
+            |error| eprintln!("spotify-core: audio output stream error: {error}"),
             None,
         )
         .ok()
