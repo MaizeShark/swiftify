@@ -26,11 +26,12 @@
 
 use std::{
     sync::{
-        Arc, Mutex, MutexGuard, PoisonError,
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        Arc, Mutex, MutexGuard, OnceLock, PoisonError,
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         mpsc,
     },
     thread,
+    time::{Duration, Instant},
 };
 
 use rodio::{
@@ -81,6 +82,34 @@ where
     Some((stream, rate))
 }
 
+/// pipewire's alsa compatibility layer can report `alsa::poll() returned
+/// POLLERR` on every poll cycle while the stream keeps playing: it is a
+/// persistent revent cpal surfaces each time, not a one-off fault. printing
+/// every one floods the terminal, so a storm is collapsed into one line every
+/// few seconds that carries a count of what it stood in for.
+fn report_stream_error(error: &cpal::StreamError) {
+    const QUIET: Duration = Duration::from_secs(5);
+    static BASE: OnceLock<Instant> = OnceLock::new();
+    // milliseconds since BASE, plus one so a logged time is never the 0 that
+    // marks "nothing logged yet"
+    static LAST_MS: AtomicU64 = AtomicU64::new(0);
+    static SUPPRESSED: AtomicU64 = AtomicU64::new(0);
+
+    let now = BASE.get_or_init(Instant::now).elapsed().as_millis() as u64 + 1;
+    let last = LAST_MS.load(Ordering::Relaxed);
+    if last != 0 && now.saturating_sub(last) < QUIET.as_millis() as u64 {
+        SUPPRESSED.fetch_add(1, Ordering::Relaxed);
+        return;
+    }
+    LAST_MS.store(now, Ordering::Relaxed);
+    match SUPPRESSED.swap(0, Ordering::Relaxed) {
+        0 => eprintln!("spotify-core: audio output stream error: {error}"),
+        hidden => eprintln!(
+            "spotify-core: audio output stream error: {error} ({hidden} more suppressed)"
+        ),
+    }
+}
+
 fn build_stereo_stream<F>(
     device: &cpal::Device,
     format: cpal::SampleFormat,
@@ -97,7 +126,7 @@ where
                 .build_output_stream::<f32, _, _>(
                     config,
                     move |data, _| fill(data),
-                    |error| eprintln!("spotify-core: audio output stream error: {error}"),
+                    |error| report_stream_error(&error),
                     None,
                 )
                 .ok()
@@ -144,7 +173,7 @@ where
                     }
                 }
             },
-            |error| eprintln!("spotify-core: audio output stream error: {error}"),
+            |error| report_stream_error(&error),
             None,
         )
         .ok()
